@@ -1,0 +1,16 @@
+{% if not view.messages %}
+  <p class="muted">Сообщений пока нет.</p>
+{% else %}
+  <ol class="message-list">
+    {% for message in view.messages %}
+      <li class="message {{ 'outbound' if message.is_outbound else 'inbound' }}">
+        <div class="message-meta">
+          <span class="message-author">{{ message.author }}</span>
+          <span class="muted small">{{ message.created_at }}</span>
+          {% if message.kind %}<span class="tag">{{ message.kind }}</span>{% endif %}
+        </div>
+        <div class="message-body">{{ message.body }}</div>
+      </li>
+    {% endfor %}
+  </ol>
+{% endif %}

@@ -1,0 +1,19 @@
+# Миграции схемы hirebot
+
+Одна начальная ревизия `0001_initial` описывает всю схему: она сгенерирована
+по моделям `hirebot.infra.db.models` и должна им соответствовать (проверяется
+`alembic check`).
+
+```bash
+# применить
+.venv/Scripts/python.exe -m alembic upgrade head
+
+# проверить, что модели и миграции не разъехались
+.venv/Scripts/python.exe -m alembic check
+
+# новая ревизия
+.venv/Scripts/python.exe -m alembic revision --autogenerate -m "add something"
+```
+
+DSN берётся из `HIREBOT_DATABASE__DSN` (см. `alembic/env.py`), а не из
+`alembic.ini`: одна точка правды о подключении.

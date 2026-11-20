@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Очередь — AI-рекрутер{% endblock %}
+{% set active_nav = "queue" %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Очередь диалогов</h1>
+    <p class="muted">
+      Свежие отклики и диалоги. Порядок — сначала те, где нужен человек.
+    </p>
+  </div>
+  <div class="page-actions">
+    <form method="post" action="/ui/poll" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label class="inline-label">
+        Площадка
+        <select name="channel">
+          {% for channel in channels %}
+            <option value="{{ channel }}">{{ channel }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="primary">Забрать отклики</button>
+    </form>
+  </div>
+</div>
+
+<section class="counters">
+  {% for counter in counters %}
+    <a class="counter {% if counter.state == state_filter %}selected{% endif %}"
+       href="/ui/queue?state={{ counter.state }}">
+      <span class="counter-value">{{ counter.count }}</span>
+      <span class="counter-label">{{ counter.label }}</span>
+    </a>
+  {% endfor %}
+</section>
+
+{% if not rows %}
+  <div class="empty">
+    <p>Диалогов нет.</p>
+    <p class="muted">
+      Нажмите «Забрать отклики», чтобы опросить площадку, или запустите
+      <code>hirebot poll --channel hh</code>.
+    </p>
+  </div>
+{% else %}
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Кандидат</th>
+        <th>Вакансия</th>
+        <th>Балл</th>
+        <th>Вердикт</th>
+        <th>Состояние</th>
+        <th>Последнее сообщение</th>
+        <th>Когда</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr class="{% if row.needs_human %}needs-human{% endif %}">
+          <td>
+            <a href="/ui/conversations/{{ row.conversation_id }}">{{ row.candidate_name }}</a>
+            <div class="muted small">{{ row.channel }}</div>
+          </td>
+          <td>{{ row.vacancy_title }}</td>
+          <td class="numeric">
+            {% if row.score is not none %}{{ "%.1f"|format(row.score) }}{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td><span class="badge verdict-{{ row.verdict }}">{{ row.verdict_label }}</span></td>
+          <td><span class="badge state-{{ row.state }}">{{ row.state_label }}</span></td>
+          <td class="preview">{{ row.last_message }}</td>
+          <td class="muted small">{{ row.updated_at }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

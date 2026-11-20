@@ -1,0 +1,60 @@
+name: hirebot
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hirebot
+      POSTGRES_PASSWORD: hirebot
+      POSTGRES_DB: hirebot
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hirebot -d hirebot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Опционально: API и воркер внутри compose.
+  # Профиль `full` нужен, чтобы `docker compose up -d` поднимал только инфраструктуру.
+  api:
+    profiles: ["full"]
+    build: .
+    env_file: [.env]
+    environment:
+      HIREBOT_DATABASE__DSN: postgresql+asyncpg://hirebot:hirebot@postgres:5432/hirebot
+      HIREBOT_REDIS__DSN: redis://redis:6379/0
+    command: ["uvicorn", "hirebot.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  worker:
+    profiles: ["full"]
+    build: .
+    env_file: [.env]
+    environment:
+      HIREBOT_DATABASE__DSN: postgresql+asyncpg://hirebot:hirebot@postgres:5432/hirebot
+      HIREBOT_REDIS__DSN: redis://redis:6379/0
+    command: ["python", "-m", "hirebot.cli", "worker"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+volumes:
+  pgdata:

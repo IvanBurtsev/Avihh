@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Вход — AI-рекрутер{% endblock %}
+
+{% block content %}
+<section class="login-card">
+  <h1>Вход в очередь рекрутера</h1>
+  <p class="muted">
+    Введите ключ доступа — значение <code>HIREBOT_SECURITY__WEBHOOK_SECRET</code>
+    вашей инсталляции.
+  </p>
+
+  {% if error %}
+    <div class="banner error">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/ui/login" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="hidden" name="next" value="{{ next_url }}" />
+    <label>
+      Ключ доступа
+      <input
+        type="password"
+        name="key"
+        autocomplete="current-password"
+        autofocus
+        required
+        placeholder="введите ключ"
+      />
+    </label>
+    <button type="submit" class="primary">Войти</button>
+  </form>
+</section>
+{% endblock %}

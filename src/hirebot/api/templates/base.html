@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}AI-рекрутер{% endblock %}</title>
+    <link rel="stylesheet" href="/ui/static/app.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='white'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/ui/queue">AI-рекрутер</a>
+      <nav class="nav">
+        <a href="/ui/queue" class="{% if active_nav == 'queue' %}active{% endif %}">Очередь</a>
+        <a href="/ui/approvals" class="{% if active_nav == 'approvals' %}active{% endif %}">
+          На подтверждении{% if pending_total %} <span class="nav-count">{{ pending_total }}</span>{% endif %}
+        </a>
+        {% if state_filter %}
+          <a href="/ui/queue" class="nav-reset">сбросить фильтр</a>
+        {% endif %}
+      </nav>
+      <div class="topbar-right">
+        {% if session_user %}
+          <span class="muted">рекрутер</span>
+          <form method="post" action="/ui/logout" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="link-button">выйти</button>
+          </form>
+        {% endif %}
+      </div>
+    </header>
+
+    {% if open_access %}
+      <div class="banner warn">
+        Доступ без входа: ключ UI не задан. Допустимо только локально —
+        задайте <code>HIREBOT_SECURITY__WEBHOOK_SECRET</code> перед публикацией.
+      </div>
+    {% endif %}
+
+    {% if flash %}
+      <div class="banner {{ flash_kind }}">{{ flash }}</div>
+    {% endif %}
+
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+      <span>hirebot {{ version }}</span>
+      <span class="muted">
+        Бот не отправляет сообщения без подтверждения, если включён режим апрува
+      </span>
+    </footer>
+
+    <script src="/ui/static/app.js" defer></script>
+  </body>
+</html>

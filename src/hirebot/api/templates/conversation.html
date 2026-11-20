@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}{{ view.candidate_name }} — AI-рекрутер{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <a class="back" href="/ui/queue">← к очереди</a>
+    <h1>{{ view.candidate_name }}</h1>
+    <p class="muted">
+      {{ view.vacancy_title }} · {{ view.channel }} ·
+      <span class="badge state-{{ view.state }}">{{ view.state_label }}</span>
+    </p>
+  </div>
+  <div class="page-actions">
+    {% if view.has_inbound %}
+      <form method="post" action="/ui/conversations/{{ view.conversation_id }}/process" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit" class="primary">Обработать ответ кандидата</button>
+      </form>
+    {% else %}
+      <form method="post" action="/ui/conversations/{{ view.conversation_id }}/process" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <button type="submit">Прогнать шаг воронки</button>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="columns">
+  <section class="card">
+    <h2>Скрининг</h2>
+    {% if view.screening %}
+      <div class="score-line">
+        <span class="score-value">{{ "%.1f"|format(view.screening.score) }}</span>
+        <span class="badge verdict-{{ view.screening.verdict }}">{{ view.screening.verdict_label }}</span>
+      </div>
+      {% if view.screening.summary %}
+        <p class="summary">{{ view.screening.summary }}</p>
+      {% endif %}
+
+      <table class="grid compact">
+        <thead>
+          <tr>
+            <th>Критерий</th>
+            <th class="numeric">Вес</th>
+            <th class="numeric">Оценка</th>
+            <th>Обоснование</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for criterion in view.screening.criteria %}
+            <tr class="{{ 'gap' if criterion.is_gap else '' }}">
+              <td>
+                {{ criterion.title }}
+                {% if criterion.must_have %}<span class="tag">обязательный</span>{% endif %}
+              </td>
+              <td class="numeric">{{ criterion.weight }}</td>
+              <td class="numeric">{{ "%.0f"|format(criterion.score) }}</td>
+              <td class="evidence">
+                {% if criterion.evidence %}{{ criterion.evidence }}{% else %}<span class="muted">нет цитаты — не зачтено</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if view.screening.gaps %}
+        <h3>Пробелы</h3>
+        <ul class="tight">{% for gap in view.screening.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if view.screening.questions %}
+        <h3>Вопросы, которые стоит задать</h3>
+        <ul class="tight">{% for question in view.screening.questions %}<li>{{ question }}</li>{% endfor %}</ul>
+      {% endif %}
+      <p class="muted small">
+        Модель: {{ view.screening.model }} · версия промпта {{ view.screening.prompt_version }}
+      </p>
+    {% else %}
+      <p class="muted">Скрининг ещё не выполнен.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Переписка</h2>
+    <div id="messages" class="messages">
+      {% include "_messages.html" %}
+    </div>
+
+    <form method="post" action="/ui/conversations/{{ view.conversation_id }}/message" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+      <label>
+        Сообщение кандидату
+        <textarea name="text" rows="4" maxlength="2000" required
+                  placeholder="Напишите сообщение — оно уйдёт в чат площадки"></textarea>
+      </label>
+      <button type="submit">Отправить</button>
+    </form>
+  </section>
+</div>
+
+{% if view.draft %}
+<section class="card draft-card">
+  <h2>Черновик на подтверждении</h2>
+  <p class="muted small">
+    Бот подготовил ответ. До одобрения кандидат ничего не получит.
+    {% if view.draft.reason %}Причина: {{ view.draft.reason }}.{% endif %}
+  </p>
+  <form method="post" action="/ui/approvals/{{ view.draft.draft_id }}/approve" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <label>
+      Текст сообщения (можно отредактировать)
+      <textarea name="text" rows="5" maxlength="2000" required>{{ view.draft.body }}</textarea>
+    </label>
+    <div class="draft-actions">
+      <button type="submit" class="primary">Одобрить и отправить</button>
+      <span class="muted small">
+        {{ view.draft.kind_label }}{% if view.draft.model %} · составлено {{ view.draft.model }}{% endif %}
+      </span>
+    </div>
+  </form>
+  <form method="post" action="/ui/approvals/{{ view.draft.draft_id }}/reject" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <input type="text" name="reason" maxlength="500" placeholder="причина отказа (необязательно)" />
+    <button type="submit">Отклонить</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Собеседование</h2>
+  {% if view.booking %}
+    <div class="banner ok">
+      Назначено: <strong>{{ view.booking.when }}</strong><br />
+      <span class="muted small">
+        Встреча в календаре: {{ view.booking.external_meeting_id or "—" }} ·
+        подтверждена перечитыванием
+      </span>
+    </div>
+  {% else %}
+    <p class="muted">
+      Собеседование не назначено. Предложите слоты — они строятся по занятости
+      в календаре Talantix.
+    </p>
+  {% endif %}
+
+  <form method="post" action="/ui/conversations/{{ view.conversation_id }}/slots" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+    <button type="submit">Показать свободные слоты</button>
+  </form>
+
+  {% if view.slots %}
+    <table class="grid compact">
+      <thead>
+        <tr><th>Когда</th><th>Менеджер</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for slot in view.slots %}
+          <tr>
+            <td>{{ slot.when }}</td>
+            <td class="muted">{{ slot.manager_id }}</td>
+            <td class="numeric">
+              <form method="post" action="/ui/conversations/{{ view.conversation_id }}/book" class="inline-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="slot_start" value="{{ slot.start_iso }}" />
+                <button type="submit" class="primary small">Забронировать</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted small">
+      Кандидату показывается «конфликта в календаре нет», а не «время свободно»:
+      встречи вне Talantix системе не видны.
+    </p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Резюме</h2>
+  {% if view.resume_text %}
+    <pre class="resume">{{ view.resume_text }}</pre>
+  {% else %}
+    <p class="muted">
+      Текст резюме недоступен: площадка не отдала его (нет прав или квоты).
+      Это штатная ситуация — диалог уходит рекрутеру.
+    </p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,47 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+.venv/
+venv/
+env/
+.uv-cache/
+
+.env
+.env.*
+!.env.example
+
+*.db
+*.sqlite3
+hirebot.db
+
+.pytest_cache/
+.pytest-tmp/
+.tmp/
+# Временные каталоги, которые pytest создаёт в рабочем каталоге
+pytest-cache-files-*/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Выгрузки с персональными данными кандидатов — никогда в git
+data/
+exports/
+*.csv
+*.xlsx
+
+# ...кроме эталонной выборки для замера качества: это не ПДн, а размеченный
+# тестовый набор, и он обязан версионироваться вместе с кодом.
+!data/
+!data/evaluation/
+!data/evaluation/**

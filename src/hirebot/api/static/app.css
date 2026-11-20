@@ -1,0 +1,286 @@
+/* UI рекрутера: деловой, спокойный интерфейс без внешних зависимостей.
+   Всё в одном файле: шрифты системные, иконок нет, JS не требуется для работы. */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #dfe3e8;
+  --text: #1d2530;
+  --muted: #6b7785;
+  --accent: #1f6feb;
+  --accent-soft: #e8f0fe;
+  --ok: #1a7f4b;
+  --ok-soft: #e6f4ec;
+  --warn: #9a6700;
+  --warn-soft: #fff4d6;
+  --danger: #b42318;
+  --danger-soft: #fde8e6;
+  --radius: 8px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  background: #eef1f4;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+/* --- шапка ---------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  background: #101828;
+  color: #fff;
+}
+.brand { color: #fff; font-weight: 600; letter-spacing: 0.2px; }
+.brand:hover { text-decoration: none; }
+.nav { display: flex; gap: 16px; }
+.nav a { color: #c3cad4; }
+.nav a.active, .nav a:hover { color: #fff; text-decoration: none; }
+.nav-reset { font-size: 13px; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.topbar .muted { color: #98a2b3; }
+.link-button {
+  background: none;
+  border: none;
+  color: #c3cad4;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.link-button:hover { color: #fff; text-decoration: underline; }
+
+/* --- общий каркас --------------------------------------------------------- */
+.content { max-width: 1180px; margin: 0 auto; padding: 24px; }
+.footer {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.page-head h1 { margin: 4px 0 4px; font-size: 22px; }
+.page-actions { display: flex; gap: 8px; align-items: center; }
+.back { font-size: 13px; color: var(--muted); }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+.tight { margin: 6px 0 12px; padding-left: 20px; }
+.tight li { margin: 2px 0; }
+
+/* --- баннеры -------------------------------------------------------------- */
+.banner { padding: 10px 24px; font-size: 14px; border-bottom: 1px solid var(--border); }
+.banner.ok { background: var(--ok-soft); color: var(--ok); }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner.error { background: var(--danger-soft); color: var(--danger); }
+.banner.info { background: var(--accent-soft); color: var(--accent); }
+
+/* --- счётчики ------------------------------------------------------------- */
+.counters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+.counter {
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+.counter:hover { border-color: var(--accent); text-decoration: none; }
+.counter.selected { border-color: var(--accent); background: var(--accent-soft); }
+.counter-value { font-size: 20px; font-weight: 600; }
+.counter-label { font-size: 12px; color: var(--muted); }
+
+/* --- таблицы -------------------------------------------------------------- */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.grid th, .grid td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.grid th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+  background: #fafbfc;
+}
+.grid tbody tr:last-child td { border-bottom: none; }
+.grid tbody tr:hover { background: #fafbfc; }
+.grid tr.needs-human { background: #fffdf5; }
+.grid.compact td, .grid.compact th { padding: 8px 10px; font-size: 14px; }
+.evidence { color: #475467; font-size: 13px; }
+.preview {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #475467;
+}
+tr.gap td { background: var(--danger-soft); }
+
+/* --- бейджи --------------------------------------------------------------- */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.verdict-strong_match { background: var(--ok-soft); color: var(--ok); }
+.verdict-match { background: var(--accent-soft); color: var(--accent); }
+.verdict-weak { background: var(--warn-soft); color: var(--warn); }
+.verdict-reject { background: var(--danger-soft); color: var(--danger); }
+.verdict-needs_review { background: #f1f0fb; color: #5b4b8a; }
+.state-booked { background: var(--ok-soft); color: var(--ok); }
+.state-human_review { background: var(--warn-soft); color: var(--warn); }
+.state-rejected, .state-closed { background: #f0f1f3; color: var(--muted); }
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border-radius: 4px;
+  background: #eef1f4;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- карточки ------------------------------------------------------------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+.card h2 { margin: 0 0 14px; font-size: 16px; }
+.card h3 { margin: 16px 0 6px; font-size: 14px; color: var(--muted); }
+.columns { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; align-items: start; }
+@media (max-width: 900px) {
+  .columns { grid-template-columns: 1fr; }
+}
+
+.score-line { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.score-value { font-size: 28px; font-weight: 600; }
+.summary { margin: 0 0 14px; color: #344054; }
+
+.resume {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fafbfc;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
+}
+
+/* --- переписка ------------------------------------------------------------ */
+.messages { max-height: 460px; overflow-y: auto; margin-bottom: 14px; }
+.message-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.message { padding: 10px 12px; border-radius: var(--radius); max-width: 92%; }
+.message.outbound { align-self: flex-end; background: var(--accent-soft); }
+.message.inbound { align-self: flex-start; background: #f4f5f7; }
+.message-meta { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.message-author { font-weight: 600; font-size: 13px; }
+.message-body { white-space: pre-wrap; word-break: break-word; }
+
+/* --- формы ---------------------------------------------------------------- */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.inline-form { display: inline-flex; gap: 8px; align-items: center; margin: 0; }
+.inline-label { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; color: var(--muted); }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+
+input[type="text"],
+input[type="password"],
+select,
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+textarea { resize: vertical; }
+
+button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: #f6f7f9; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: #1a5fd0; }
+button.small { padding: 4px 10px; font-size: 13px; }
+
+/* --- прочее --------------------------------------------------------------- */
+.login-card {
+  max-width: 420px;
+  margin: 48px auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+.login-card h1 { margin: 0 0 8px; font-size: 20px; }
+
+.empty {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+}
+.empty p { margin: 6px 0; }

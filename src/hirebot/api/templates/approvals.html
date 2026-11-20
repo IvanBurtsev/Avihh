@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}На подтверждении — AI-рекрутер{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>На подтверждении</h1>
+    <p class="muted">
+      Бот уже решил, что ответить, и написал текст. Проверьте и отправьте —
+      до одобрения кандидат ничего не получит.
+    </p>
+  </div>
+  <div class="page-actions">
+    <span class="badge verdict-weak">{{ drafts|length }} в очереди</span>
+  </div>
+</div>
+
+{% if not drafts %}
+  <div class="empty">
+    <p>Очередь пуста.</p>
+    <p class="muted">
+      Черновики появляются, когда включён режим подтверждения
+      (<code>HIREBOT_POLICY__REQUIRE_HUMAN_APPROVAL=true</code>) и бот обрабатывает
+      новые отклики.
+    </p>
+  </div>
+{% else %}
+  {% for draft in drafts %}
+    <section class="card draft-card">
+      <div class="draft-head">
+        <div>
+          <a class="draft-name" href="/ui/conversations/{{ draft.conversation_id }}">
+            {{ draft.candidate_name }}
+          </a>
+          <span class="muted">· {{ draft.vacancy_title }} · {{ draft.channel }}</span>
+        </div>
+        <div class="draft-meta">
+          <span class="badge state-human_review">{{ draft.kind_label }}</span>
+          {% if draft.score is not none %}
+            <span class="muted small">балл {{ "%.1f"|format(draft.score) }}</span>
+          {% endif %}
+          <span class="muted small">{{ draft.created_at }}</span>
+        </div>
+      </div>
+
+      {% if draft.reason %}
+        <p class="draft-reason">
+          <span class="muted small">Почему бот предлагает это:</span> {{ draft.reason }}
+        </p>
+      {% endif %}
+
+      <form method="post" action="/ui/approvals/{{ draft.draft_id }}/approve" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Текст сообщения (можно отредактировать)
+          <textarea name="text" rows="5" maxlength="2000" required>{{ draft.body }}</textarea>
+        </label>
+        <div class="draft-actions">
+          <button type="submit" class="primary">Одобрить и отправить</button>
+          <span class="muted small">
+            {% if draft.model %}составлено {{ draft.model }}{% endif %}
+          </span>
+        </div>
+      </form>
+
+      <form method="post" action="/ui/approvals/{{ draft.draft_id }}/reject" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <input type="text" name="reason" maxlength="500" placeholder="причина (необязательно)" />
+        <button type="submit">Отклонить</button>
+      </form>
+    </section>
+  {% endfor %}
+{% endif %}
+{% endblock %}

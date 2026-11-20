@@ -1,0 +1,275 @@
+# Продакшен-развёртывание hirebot (API + воркер + PostgreSQL + Redis).
+#
+# Отличия от docker-compose.yml в корне (это dev-конфигурация):
+#   * наружу ничего не публикуется, кроме API на loopback (его закрывает nginx);
+#   * пароли Redis/PostgreSQL обязательны и берутся из deploy/.env;
+#   * миграции применяются one-shot сервисом `migrate` до старта API и воркера;
+#   * у сервисов заданы политики перезапуска, лимиты ресурсов и `read_only`;
+#   * HIREBOT_ENV=production, поэтому Settings сам проверит, что DSN ведёт в
+#     PostgreSQL, задан PII_KEY и включён брокер arq (см. hirebot/config.py).
+#
+# Запуск (из каталога deploy/):
+#   cp .env.example .env && $EDITOR .env
+#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml up -d migrate api worker
+#   docker compose -f docker-compose.prod.yml ps
+#
+# Порядок, откат и проверки — в deploy/README.md. Инциденты — docs/RUNBOOK.md.
+
+name: hirebot
+
+# --------------------------------------------------------------------------- #
+# Общие фрагменты
+# --------------------------------------------------------------------------- #
+
+x-app-image: &app-image
+  build:
+    # Контекст — корень репозитория: образ собирается тем же Dockerfile, что и
+    # для разработки (в нём уже непривилегированный пользователь).
+    context: ..
+    dockerfile: Dockerfile
+  image: ${HIREBOT_IMAGE:-hirebot}:${HIREBOT_TAG:-latest}
+
+x-app-environment: &app-environment
+  # Значения, которые обязаны быть именно такими в продакшене. Если переменная
+  # не задана, `docker compose up` падает сразу с понятным сообщением, а не
+  # через неделю в рантайме.
+  HIREBOT_ENV: production
+  HIREBOT_LOG_JSON: "true"
+  # Адрес и порт внутри контейнера (публикуется только на loopback).
+  HIREBOT_API_HOST: 0.0.0.0
+  HIREBOT_API_PORT: "8000"
+  # PostgreSQL: DSN собирается здесь из пароля, чтобы строка подключения не
+  # дублировалась в двух местах.
+  HIREBOT_DATABASE__DSN: postgresql+asyncpg://${POSTGRES_USER:-hirebot}:${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env}@postgres:5432/${POSTGRES_DB:-hirebot}
+  HIREBOT_DATABASE__POOL_SIZE: ${HIREBOT_DATABASE__POOL_SIZE:-10}
+  HIREBOT_DATABASE__STATEMENT_TIMEOUT_MS: ${HIREBOT_DATABASE__STATEMENT_TIMEOUT_MS:-15000}
+  # Redis используется и как кэш/локи, и как брокер arq: без него воркер
+  # не получит ни одной задачи, поэтому он обязателен (required=true).
+  HIREBOT_REDIS__DSN: redis://:${REDIS_PASSWORD:?задайте REDIS_PASSWORD в deploy/.env}@redis:6379/0
+  HIREBOT_REDIS__REQUIRED: "true"
+  HIREBOT_QUEUE__BACKEND: arq
+  HIREBOT_QUEUE__QUEUE_NAME: ${HIREBOT_QUEUE__QUEUE_NAME:-hirebot}
+  # Секреты обязательны: PII_KEY — шифрование персональных данных (152-ФЗ),
+  # WEBHOOK_SECRET — ключ для защищённых эндпоинтов API (X-API-Key), включая /metrics.
+  HIREBOT_SECURITY__PII_KEY: ${HIREBOT_SECURITY__PII_KEY:?задайте HIREBOT_SECURITY__PII_KEY в deploy/.env}
+  HIREBOT_SECURITY__WEBHOOK_SECRET: ${HIREBOT_SECURITY__WEBHOOK_SECRET:?задайте HIREBOT_SECURITY__WEBHOOK_SECRET в deploy/.env}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    # Логи не должны занимать диск: JSON-логи пишутся в stdout и уходят в сборщик.
+    max-size: "32m"
+    max-file: "5"
+
+x-hardening: &default-hardening
+  init: true
+  security_opt:
+    - "no-new-privileges:true"
+
+x-app-defaults: &app-defaults
+  <<: [*app-image, *default-hardening]
+  # Всё остальное окружение (каналы, LLM, Talantix) — из deploy/.env: значения
+  # из блока environment выше имеют приоритет над env_file.
+  env_file:
+    - .env
+  environment: *app-environment
+  logging: *default-logging
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  networks:
+    - backend
+
+# --------------------------------------------------------------------------- #
+# Сервисы
+# --------------------------------------------------------------------------- #
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hirebot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-hirebot}
+      # Храним WAL в UTC и не полагаемся на локаль хоста.
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Порт наружу не публикуется: доступен только сервисам сети backend.
+    shm_size: "256m"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} -t 5"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    stop_grace_period: 60s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${POSTGRES_CPUS:-2.0}"
+          memory: ${POSTGRES_MEMORY:-2g}
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    <<: *default-hardening
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD в deploy/.env}
+      # redis-cli берёт пароль из REDISCLI_AUTH, а не из argv: он не должен
+      # быть виден в списке процессов контейнера.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?задайте REDIS_PASSWORD в deploy/.env}
+    # Пароль не попадает в argv процесса: конфиг генерируется во временный
+    # файл (tmpfs) на старте контейнера.
+    command:
+      - sh
+      - -c
+      - >-
+        printf 'requirepass %s\nappendonly yes\nappendfsync everysec\nmaxmemory-policy noeviction\nsave 900 1\n'
+        "$$REDIS_PASSWORD" > /tmp/redis.conf &&
+        exec redis-server /tmp/redis.conf
+    # AOF включён: очередь arq и таблица задач живут в Redis; потеря без AOF
+    # означала бы потерянные задачи после рестарта.
+    volumes:
+      - redisdata:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    stop_grace_period: 30s
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPUS:-1.0}"
+          memory: ${REDIS_MEMORY:-512m}
+    networks:
+      - backend
+
+  # One-shot сервис миграций. API и воркер стартуют только после его успешного
+  # завершения (service_completed_successfully): незамигрированная схема —
+  # самая дорогая ошибка деплоя.
+  migrate:
+    <<: [*app-image, *default-hardening]
+    restart: "no"
+    env_file:
+      - .env
+    environment: *app-environment
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "${MIGRATE_CPUS:-1.0}"
+          memory: ${MIGRATE_MEMORY:-512m}
+
+  api:
+    <<: *app-defaults
+    restart: unless-stopped
+    # Прокси-заголовки принимаются только от loopback (по умолчанию uvicorn).
+    # Если nginx живёт в контейнере другой сети — задайте FORWARDED_ALLOW_IPS.
+    command:
+      - uvicorn
+      - hirebot.api.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+    ports:
+      # Только loopback: наружу — исключительно через reverse-proxy (deploy/nginx.conf).
+      - "127.0.0.1:${HIREBOT_HOST_PORT:-8000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request,sys;
+          sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPUS:-2.0}"
+          memory: ${API_MEMORY:-1g}
+
+  worker:
+    <<: *app-defaults
+    restart: unless-stopped
+    # arq-воркер: cron поллинга площадок и диспетчер outbox.
+    command: ["python", "-m", "hirebot.cli", "worker"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "${WORKER_CPUS:-2.0}"
+          memory: ${WORKER_MEMORY:-1g}
+
+  # Опциональный reverse-proxy в compose (профиль `proxy`).
+  # Обычно nginx ставится на хост и читает deploy/nginx.conf; этот сервис нужен
+  # тем, кто хочет держать прокси в Docker. Хостовая сеть используется, чтобы
+  # nginx видел API на 127.0.0.1:8000 и TLS-сертификаты на диске хоста.
+  proxy:
+    profile: ["proxy"]
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    <<: *default-hardening
+    network_mode: host
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # Сертификаты: deploy/tls/live/<домен>/{fullchain.pem,privkey.pem}
+      - ./tls:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  backend:
+    # Внутренняя сеть: контейнеры видят друг друга, но не выходят наружу.
+    # Трафику к площадкам (hh.ru, Avito, Talantix, LLM) нужен выход — поэтому
+    # сеть НЕ помечена internal.
+    driver: bridge
