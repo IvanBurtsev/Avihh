@@ -8,6 +8,26 @@ Redis, API, воркером и one-shot миграциями, пример reve
 (истёк токен, 429, растущий outbox, недоступная БД) разобраны отдельно — в
 [`../docs/RUNBOOK.md`](../docs/RUNBOOK.md).
 
+## 0. Активация CI
+
+Готовый workflow лежит в `deploy/ci.yml.example`. Он не закоммичен в
+`.github/workflows/` намеренно: GitHub требует для этого отдельный scope
+`workflow`, и без него push отклоняется.
+
+```bash
+mkdir -p .github/workflows
+cp deploy/ci.yml.example .github/workflows/ci.yml
+git add .github/workflows/ci.yml
+git commit -m "CI: линт, типы, тесты, миграции, аудит зависимостей"
+git push
+```
+
+Если токену не хватает scope: `gh auth refresh -s workflow,repo`.
+
+Что делает workflow: `ruff` (линт и формат), `mypy --strict`, `pytest` с
+покрытием, `alembic upgrade head` + `alembic check` на чистой базе, аудит
+зависимостей (не блокирующий). PostgreSQL-джоба запускается вручную.
+
 ## 1. Что где лежит
 
 | Файл | Назначение |

@@ -34,7 +34,10 @@ htmlcov/
 *.swp
 .DS_Store
 
-# Выгрузки с персональными данными кандидатов — никогда в git
+# Сырьё исследования площадок: скачанные HTML/JS/JSON и одноразовые скрипты.
+# Итоговые документы лежат в docs/research/*.md.
+docs/research/_raw/
+docs/research/_*
 data/
 exports/
 *.csv
