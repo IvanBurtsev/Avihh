@@ -312,6 +312,7 @@ tests/unit/resilience/ инъекция сбоев: таймауты, 429, ду�
 
 ## Документация
 
+* [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) — разбор одного отклика по шагам: что происходит и от чего защищено (для демонстрации)
 * [docs/ACCESS-REQUESTS.md](docs/ACCESS-REQUESTS.md) — готовые заявки и чеклисты для получения доступов к площадкам
 * [docs/EVALUATION.md](docs/EVALUATION.md) — замер качества скрининга: эталонная выборка, метрики, разбор ошибок
 * [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура, решения, модель данных, риски, roadmap
