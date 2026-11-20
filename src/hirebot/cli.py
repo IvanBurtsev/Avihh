@@ -52,6 +52,9 @@ INLINE_BATCH_SIZE = 20
 #: Эталонная выборка для замера качества скрининга (относительно корня проекта).
 DEFAULT_DATASET_PATH = "data/evaluation/golden_set.json"
 
+#: Справочник критериев подбора (относительно корня проекта).
+DEFAULT_CATALOG_PATH = "data/criteria/catalog.yaml"
+
 #: Цвет и подпись для каждого статуса проверки.
 _STATUS_STYLE: dict[Status, tuple[str, str]] = {
     "ok": ("green", "OK"),
@@ -974,6 +977,85 @@ def walkthrough(
 
     if quiet:
         console.print(format_summary(summary))
+
+
+# ---------------------------------------------------------------------------
+# criteria
+# ---------------------------------------------------------------------------
+
+
+@app.command(help="Справочник критериев подбора: из чего выбирать критерии вакансии.")
+def criteria(
+    category: Annotated[
+        str | None, typer.Option("--category", "-c", help="Показать только эту категорию")
+    ] = None,
+    markdown: Annotated[
+        bool, typer.Option("--markdown", help="Вывести справочник в markdown (для документа)")
+    ] = False,
+    catalog_path: Annotated[
+        str, typer.Option("--catalog", help="Путь к каталогу критериев")
+    ] = DEFAULT_CATALOG_PATH,
+) -> None:
+    """Показать каталог критериев, из которого выбираются критерии вакансии.
+
+    Критерии не выдумываются системой: это справочник, из которого рекрутер
+    вместе с нанимающим менеджером выбирает нужное. Выбранные ключи передаются
+    в вакансию как ``criteria``.
+    """
+    from hirebot.criteria import CatalogError, load_catalog, render_markdown
+
+    ensure_utf8_streams()
+    try:
+        catalog = load_catalog(catalog_path)
+    except CatalogError as exc:
+        err_console.print(f"[red]Каталог критериев некорректен:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if markdown:
+        console.print(render_markdown(catalog), markup=False, highlight=False)
+        return
+
+    selected = catalog.by_category()
+    shown = 0
+    for key, group in catalog.categories.items():
+        if category is not None and key != category:
+            continue
+        items = selected.get(key, [])
+        if not items:
+            continue
+        shown += len(items)
+        table = Table(title=f"{group.title} ({len(items)})", show_lines=False)
+        table.add_column("Ключ", style="cyan", no_wrap=True)
+        table.add_column("Критерий", style="bold", overflow="fold")
+        table.add_column("Проверяемость", no_wrap=True)
+        table.add_column("Вес", justify="right", no_wrap=True)
+        table.add_column("Обязат.", justify="center", no_wrap=True)
+        for item in items:
+            title = item.title + (" ⚖" if item.needs_lawyer else "")
+            table.add_row(
+                item.key,
+                title,
+                item.measurable_label,
+                str(item.weight_hint),
+                "да" if item.must_have_hint else "—",
+            )
+        console.print(table)
+        if group.description:
+            console.print(f"  [dim]{group.description}[/dim]")
+
+    console.print(
+        f"\nВсего показано: [bold]{shown}[/bold] из {len(catalog.criteria)}. ⚖ — требует решения юриста."
+    )
+    console.print(
+        "[dim]Вес и обязательность здесь — подсказка. Итоговые значения утверждает "
+        "рекрутер под вакансию.[/dim]"
+    )
+    if catalog.forbidden:
+        console.print(
+            f"[red]Запрещённых признаков в каталоге нет[/red] и быть не может: "
+            f"{len(catalog.forbidden)} групп (пол, возраст, национальность и др.) "
+            "заблокированы правилами."
+        )
 
 
 # ---------------------------------------------------------------------------

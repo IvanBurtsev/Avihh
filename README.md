@@ -40,6 +40,9 @@ uv pip install -e ".[dev]"
 # 5. Пошаговый разбор: что происходит между откликом и встречей
 .\.venv\Scripts\python.exe -m hirebot.cli walkthrough
 
+# 6. Справочник критериев подбора: из чего выбирать критерии вакансии
+.\.venv\Scripts\python.exe -m hirebot.cli criteria
+
 # 5. Показать интерфейс с данными: наполнить базу и открыть /ui
 .\.venv\Scripts\python.exe -m hirebot.cli seed
 .\.venv\Scripts\python.exe -m hirebot.cli serve
@@ -312,6 +315,7 @@ tests/unit/resilience/ инъекция сбоев: таймауты, 429, ду�
 
 ## Документация
 
+* [docs/CRITERIA-CATALOG.md](docs/CRITERIA-CATALOG.md) — справочник критериев подбора: из чего выбирать под вакансию
 * [docs/WALKTHROUGH.md](docs/WALKTHROUGH.md) — разбор одного отклика по шагам: что происходит и от чего защищено (для демонстрации)
 * [docs/ACCESS-REQUESTS.md](docs/ACCESS-REQUESTS.md) — готовые заявки и чеклисты для получения доступов к площадкам
 * [docs/EVALUATION.md](docs/EVALUATION.md) — замер качества скрининга: эталонная выборка, метрики, разбор ошибок

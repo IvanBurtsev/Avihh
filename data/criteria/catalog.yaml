@@ -1,0 +1,525 @@
+# Каталог критериев подбора.
+#
+# Это СПРАВОЧНИК, а не рекомендация: из него выбирают критерии под конкретную
+# вакансию. Система ничего не выбирает сама.
+#
+# Поля:
+#   key             короткий идентификатор (латиницей, уникальный)
+#   title           название для интерфейса
+#   category        группа (см. categories)
+#   kind            skill | experience | education | language | condition |
+#                   document | soft | location
+#   question        что именно проверяем — формулировка для рекрутера
+#   evidence_hint   что искать в резюме (это уходит в промпт как ориентир)
+#   measurable      high | medium | low — насколько надёжно видно из резюме
+#   weight_hint     предлагаемый вес по умолчанию (1..3)
+#   must_have_hint  предлагать ли как обязательный
+#   legal_note      непустое значение = требует решения юриста до использования
+#
+# ВАЖНО: поля weight_hint и must_have_hint — это стартовые подсказки, а не
+# решение. Итоговые веса и обязательность утверждает рекрутер под вакансию.
+#
+# Запрещённые признаки (пол, возраст, национальность и т.п.) в каталог
+# намеренно НЕ включены и проверяются PolicyGuard.
+
+categories:
+  experience:
+    title: Опыт и стаж
+    description: Сколько и где человек работал. Проверяется по датам и должностям.
+  tech:
+    title: Профессиональные навыки и технологии
+    description: Владение инструментами, стеком, оборудованием.
+  education:
+    title: Образование и сертификаты
+    description: Формальные подтверждения квалификации.
+  language:
+    title: Языки
+    description: Владение языками и уровень.
+  conditions:
+    title: Условия работы
+    description: Готовность к формату, графику, условиям. Проверяется вопросом, не догадкой.
+  documents:
+    title: Документы и допуски
+    description: Формальные требования, без которых нельзя оформить.
+  soft:
+    title: Поведенческие характеристики
+    description: Плохо проверяются по резюме — только как тема для вопросов.
+  location:
+    title: Локация и логистика
+    description: Где живёт и готов ли добираться.
+
+criteria:
+  # --- Опыт и стаж ---------------------------------------------------------
+  - key: total_experience
+    title: Общий стаж работы
+    category: experience
+    kind: experience
+    question: Сколько лет человек работает по специальности?
+    evidence_hint: Даты начала и окончания мест работы, суммарный стаж
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: relevant_experience
+    title: Стаж по профилю вакансии
+    category: experience
+    kind: experience
+    question: Сколько лет человек работал именно в этой роли или сфере?
+    evidence_hint: Должности и обязанности, совпадающие с профилем вакансии
+    measurable: high
+    weight_hint: 3
+    must_have_hint: true
+
+  - key: industry_experience
+    title: Опыт в отрасли
+    category: experience
+    kind: experience
+    question: Работал ли кандидат в нашей отрасли?
+    evidence_hint: Названия компаний и сферы их деятельности
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: team_lead_experience
+    title: Опыт руководства людьми
+    category: experience
+    kind: experience
+    question: Руководил ли кандидат командой?
+    evidence_hint: Формулировки «руководил», «в подчинении N человек», «тимлид», «начальник отдела»
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: client_facing_experience
+    title: Опыт работы с клиентами
+    category: experience
+    kind: experience
+    question: Работал ли кандидат напрямую с клиентами?
+    evidence_hint: «клиент», «продажи», «обслуживание», «переговоры», «поддержка клиентов»
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: no_job_gaps
+    title: Отсутствие длительных перерывов в работе
+    category: experience
+    kind: experience
+    question: Есть ли перерывы больше года, и объяснены ли они?
+    evidence_hint: Промежутки между датами; причина перерыва, если указана
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: job_stability
+    title: Стабильность мест работы
+    category: experience
+    kind: experience
+    question: Как долго кандидат задерживался на прошлых местах?
+    evidence_hint: Длительность каждого места работы
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  # --- Навыки и технологии (IT) -------------------------------------------
+  - key: python
+    title: Python
+    category: tech
+    kind: skill
+    question: Есть ли опыт разработки на Python и сколько лет?
+    evidence_hint: Python, Django, FastAPI, Flask, asyncio, pandas, скрипты автоматизации
+    measurable: high
+    weight_hint: 3
+    must_have_hint: true
+
+  - key: javascript
+    title: JavaScript / TypeScript
+    category: tech
+    kind: skill
+    question: Есть ли опыт фронтенд-разработки?
+    evidence_hint: JavaScript, TypeScript, React, Vue, Angular, Node.js
+    measurable: high
+    weight_hint: 3
+    must_have_hint: true
+
+  - key: sql
+    title: SQL и реляционные базы
+    category: tech
+    kind: skill
+    question: Работал ли кандидат с базами данных?
+    evidence_hint: SQL, PostgreSQL, MySQL, Oracle, MS SQL, запросы, оптимизация
+    measurable: high
+    weight_hint: 2
+    must_have_hint: true
+
+  - key: rest_api
+    title: Проектирование REST API
+    category: tech
+    kind: skill
+    question: Проектировал ли кандидат API?
+    evidence_hint: REST, API, OpenAPI, Swagger, gRPC, интеграции
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: devops
+    title: DevOps и инфраструктура
+    category: tech
+    kind: skill
+    question: Есть ли опыт с инфраструктурой и деплоем?
+    evidence_hint: Docker, Kubernetes, CI/CD, Linux, Terraform, ansible
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: ml
+    title: Машинное обучение
+    category: tech
+    kind: skill
+    question: Есть ли опыт в ML?
+    evidence_hint: ML, машинное обучение, sklearn, PyTorch, TensorFlow, LLM, NLP
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  - key: excel
+    title: Excel / Google Таблицы
+    category: tech
+    kind: skill
+    question: Владеет ли кандидат таблицами на рабочем уровне?
+    evidence_hint: Excel, сводные таблицы, ВПР/VLOOKUP, Google Sheets, отчётность
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: crm
+    title: Работа в CRM
+    category: tech
+    kind: skill
+    question: Работал ли кандидат в CRM-системе?
+    evidence_hint: CRM, amoCRM, Битрикс24, Salesforce, 1С:CRM, ведение клиентской базы
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: one_c
+    title: 1С
+    category: tech
+    kind: skill
+    question: Есть ли опыт с 1С?
+    evidence_hint: 1С, 1С:Предприятие, УТ, ЗУП, программирование 1С
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  # --- Навыки массового подбора -------------------------------------------
+  - key: sales_skills
+    title: Навыки продаж
+    category: tech
+    kind: skill
+    question: Есть ли опыт активных продаж?
+    evidence_hint: продажи, план, KPI, холодные звонки, воронка, сделки, выручка
+    measurable: medium
+    weight_hint: 3
+    must_have_hint: true
+
+  - key: cash_register
+    title: Работа с кассой
+    category: tech
+    kind: skill
+    question: Работал ли кандидат с кассой и эквайрингом?
+    evidence_hint: касса, ККТ, эквайринг, инкассация, торговый зал
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: warehouse_equipment
+    title: Складская техника
+    category: tech
+    kind: skill
+    question: Умеет ли работать на погрузчике, штабелёре, ТСД?
+    evidence_hint: погрузчик, штабелёр, ТСД, scanner, WMS, комплектовщик, гидравлическая тележка
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  - key: driving_experience
+    title: Опыт вождения
+    category: tech
+    kind: skill
+    question: Есть ли опыт вождения и какой стаж?
+    evidence_hint: водитель, категория, стаж вождения, километраж, маршруты
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  - key: call_center
+    title: Работа в колл-центре
+    category: tech
+    kind: skill
+    question: Есть ли опыт телефонных разговоров с клиентами?
+    evidence_hint: колл-центр, оператор, входящие/исходящие звонки, скрипты, KPI по звонкам
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  # --- Образование ---------------------------------------------------------
+  - key: higher_education
+    title: Высшее образование
+    category: education
+    kind: education
+    question: Есть ли высшее образование?
+    evidence_hint: «высшее», вуз, университет, институт, специальность
+    measurable: high
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: education_field
+    title: Профильное образование
+    category: education
+    kind: education
+    question: Совпадает ли специальность с профилем вакансии?
+    evidence_hint: Специальность, факультет, направление подготовки
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: certifications
+    title: Профессиональные сертификаты
+    category: education
+    kind: education
+    question: Есть ли подтверждённые сертификаты по профилю?
+    evidence_hint: Названия сертификатов, годен до, удостоверение, аттестация
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: courses
+    title: Профильные курсы
+    category: education
+    kind: education
+    question: Проходил ли кандидат курсы по специальности?
+    evidence_hint: Курсы, школа, программы обучения, диплом о переподготовке
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  # --- Языки ---------------------------------------------------------------
+  - key: english
+    title: Английский язык
+    category: language
+    kind: language
+    question: Каков уровень английского по резюме?
+    evidence_hint: A1..C2, IELTS, TOEFL, «читаю документацию», «переписка», «свободно»
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: other_language
+    title: Другой язык
+    category: language
+    kind: language
+    question: Владеет ли кандидат другим языком?
+    evidence_hint: Названия языков и уровни, кроме русского и английского
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  # --- Условия работы ------------------------------------------------------
+  - key: schedule_full_time
+    title: Готовность к полной занятости
+    category: conditions
+    kind: condition
+    question: Готов ли кандидат работать полный день?
+    evidence_hint: В резюме почти не видно — уточняется вопросом кандидату
+    measurable: low
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: shift_work
+    title: Готовность к сменному графику
+    category: conditions
+    kind: condition
+    question: Готов ли кандидат работать сменами, включая ночные?
+    evidence_hint: Упоминание смен в опыте; иначе уточняется вопросом
+    measurable: low
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: remote_work
+    title: Готовность к удалённой работе
+    category: conditions
+    kind: condition
+    question: Готов ли кандидат работать удалённо?
+    evidence_hint: «удалённо», «remote», опыт дистанционной работы
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: business_trips
+    title: Готовность к командировкам
+    category: conditions
+    kind: condition
+    question: Готов ли кандидат к командировкам и разъездам?
+    evidence_hint: «командировки», «разъездной характер», водительские права
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: relocation
+    title: Готовность к переезду
+    category: conditions
+    kind: condition
+    question: Готов ли кандидат переехать?
+    evidence_hint: «готов к переезду», «переезд», «релокация»
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: salary_expectations
+    title: Зарплатные ожидания
+    category: conditions
+    kind: condition
+    question: Совпадают ли ожидания кандидата с бюджетом вакансии?
+    evidence_hint: Желаемая зарплата в резюме или сопроводительном письме
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: start_availability
+    title: Скорость выхода
+    category: conditions
+    kind: condition
+    question: Как быстро кандидат может начать?
+    evidence_hint: «готов выйти», «две недели», «сразу», дата доступности
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  # --- Документы и допуски -------------------------------------------------
+  - key: driver_license
+    title: Водительские права
+    category: documents
+    kind: document
+    question: Есть ли права нужной категории?
+    evidence_hint: Категория прав (B, C, D, E), «права есть»
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  - key: medical_book
+    title: Медицинская книжка
+    category: documents
+    kind: document
+    question: Есть ли действующая медкнижка?
+    evidence_hint: Медкнижка, санитарная книжка, «готова оформить»
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+
+  - key: work_permit
+    title: Право на работу в РФ
+    category: documents
+    kind: document
+    question: Есть ли законное право на трудоустройство?
+    evidence_hint: Гражданство, разрешение на работу, патент, РВП, ВНЖ
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    legal_note: >
+      Требование законно для оформления по ТК РФ, но фильтрация по гражданству
+      может быть признана дискриминацией. Формулировать как проверку права на
+      работу, а не как отбор по национальности. Нужно подтверждение юриста.
+
+  - key: security_clearance
+    title: Допуск к охраняемым объектам
+    category: documents
+    kind: document
+    question: Есть ли допуск, если объект его требует?
+    evidence_hint: Допуск, форма допуска, секретность, режимный объект
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    legal_note: Применять только если этого требует объект; проверить с юристом.
+
+  # --- Поведенческие (только темы для вопросов) ---------------------------
+  - key: communication_skill
+    title: Коммуникативные навыки
+    category: soft
+    kind: soft
+    question: Как кандидат описывает работу с людьми?
+    evidence_hint: Только как тема для уточняющего вопроса — по резюме не оценивается
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: stress_resistance
+    title: Стрессоустойчивость
+    category: soft
+    kind: soft
+    question: Как кандидат ведёт себя в напряжённых ситуациях?
+    evidence_hint: Только как тема для вопроса; «стрессоустойчивость» в резюме — не доказательство
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  - key: learning_ability
+    title: Обучаемость
+    category: soft
+    kind: soft
+    question: Осваивал ли кандидат новые инструменты?
+    evidence_hint: Смена стека, обучение, самостоятельное освоение технологий
+    measurable: low
+    weight_hint: 1
+    must_have_hint: false
+
+  # --- Локация -------------------------------------------------------------
+  - key: city
+    title: Город проживания
+    category: location
+    kind: location
+    question: В каком городе живёт кандидат?
+    evidence_hint: Город в резюме, готовность к переезду
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+
+  - key: commute
+    title: Готовность добираться до места работы
+    category: location
+    kind: location
+    question: Удобно ли кандидату добираться до офиса или склада?
+    evidence_hint: Район проживания, метро, готовность к дороге
+    measurable: low
+    weight_hint: 2
+    must_have_hint: false
+
+# Критерии, которые использовать НЕЛЬЗЯ. Раздел существует, чтобы вопрос
+# «а можно ли отбирать по возрасту?» решался ссылкой, а не спором.
+forbidden:
+  - group: Пол и гендер
+    reason: Дискриминация (ст. 3 ТК РФ, ст. 13.11.1 КоАП РФ)
+    aliases: [пол, gender, мужчина, женщина, sex]
+  - group: Возраст и дата рождения
+    reason: Дискриминация; возраст не влияет на способность работать
+    aliases: [возраст, age, дата рождения, birth, год рождения, 18-35, до 40 лет]
+  - group: Национальность, раса, гражданство как фильтр
+    reason: Дискриминация. Право на работу проверяется отдельным документом (см. work_permit)
+    aliases: [национальность, nationality, гражданство, раса, этнос]
+  - group: Семейное положение и дети
+    reason: Дискриминация; влияет на планы работодателя, а не на работу
+    aliases: [семейное положение, marital, замужем, женат, дети, children, беременность]
+  - group: Религия и убеждения
+    reason: Дискриминация
+    aliases: [религия, religion, вероисповедание]
+  - group: Место регистрации и прописка
+    reason: Дискриминация; проверяется фактическая возможность добираться
+    aliases: [прописка, регистрация, registration]
+  - group: Фотография
+    reason: Не относится к квалификации; источник неосознанных предубеждений
+    aliases: [фото, photo, внешность, appearance]
+  - group: Состояние здоровья и инвалидность
+    reason: Дискриминация, кроме случаев, где противопоказания установлены законом для должности
+    aliases: [здоровье, health, инвалидность, disability, болезни]
+  - group: Судимость
+    reason: Допустимо только для должностей, где это прямо предусмотрено законом; требует решения юриста
+    aliases: [судимость, criminal, convictions]
