@@ -15,6 +15,7 @@ from types import TracebackType
 from typing import Any, Protocol, Self, runtime_checkable
 from uuid import UUID
 
+from hirebot.domain.budget import PaidAction
 from hirebot.domain.entities import (
     Booking,
     Candidate,
@@ -176,6 +177,16 @@ class ScoringProfileRepository(Protocol):
 
 
 @runtime_checkable
+class PaidActionRepository(Protocol):
+    """Журнал платных действий и сумма расходов за период."""
+
+    async def add(self, action: PaidAction) -> PaidAction: ...
+    async def spent_since(self, company_id: UUID, since: datetime) -> float:
+        """Сумма списаний компании начиная с момента ``since``."""
+        ...
+
+
+@runtime_checkable
 class OutboxRepository(Protocol):
     async def add(self, entry: OutboxEntry) -> OutboxEntry: ...
     async def claim_batch(self, *, limit: int, now: datetime) -> Sequence[OutboxEntry]:
@@ -267,6 +278,7 @@ class UnitOfWork(Protocol):
     vacancies: VacancyRepository
     companies: CompanyRepository
     profiles: ScoringProfileRepository
+    paid_actions: PaidActionRepository
     candidates: CandidateRepository
     resumes: ResumeRepository
     conversations: ConversationRepository

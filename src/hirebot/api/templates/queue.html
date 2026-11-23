@@ -3,6 +3,17 @@
 {% set active_nav = "queue" %}
 
 {% block content %}
+{% if budget %}
+  <div class="banner {{ 'warn' if budget.daily_exhausted else 'info' }}"
+       style="border-radius:6px; margin-bottom:12px">
+    Платные действия сегодня: <strong>{{ budget.spent_today|int }}</strong>
+    из {{ budget.daily_limit }}
+    · за месяц: {{ budget.spent_month|int }} из {{ budget.monthly_limit }}
+    {% if budget.daily_exhausted %}
+      · <strong>дневной лимит исчерпан, открытие резюме и приглашения заблокированы</strong>
+    {% endif %}
+  </div>
+{% endif %}
 <div class="page-head">
   <div>
     <h1>Очередь диалогов</h1>

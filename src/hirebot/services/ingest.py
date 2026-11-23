@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 from uuid import UUID
 
 from hirebot.container import Container
@@ -287,8 +288,31 @@ class IngestService(ServiceBase):
                 external_id=response.resume_external_id,
                 source_url=response.resume_url,
                 fetched_at=self.now(),
+                # Сопроводительное письмо и метаданные приходят вместе с
+                # откликом, то есть бесплатно. Сохраняем их, чтобы предскоринг
+                # мог отсечь явно нерелевантное до платного открытия резюме.
+                parsed=self._preliminary_metadata(response),
             )
         )
+
+    @staticmethod
+    def _preliminary_metadata(response: InboundResponse) -> dict[str, Any]:
+        """Бесплатные данные отклика для предскоринга."""
+        metadata: dict[str, Any] = {}
+        if response.cover_letter:
+            metadata["cover_letter"] = response.cover_letter[:4000]
+        if isinstance(response.raw, dict):
+            # Храним только простые поля: вложенные структуры площадок
+            # меняются и не нужны для оценки.
+            for key in ("title", "resume_title", "position", "area", "city", "salary", "name"):
+                value = response.raw.get(key)
+                if isinstance(value, (str, int, float)) and str(value).strip():
+                    metadata[key] = str(value)
+                elif isinstance(value, dict):
+                    nested = value.get("name") or value.get("title")
+                    if isinstance(nested, str) and nested.strip():
+                        metadata[key] = nested
+        return metadata
 
     def _process_entry(self, conversation_id: UUID) -> OutboxEntry:
         now = self.now()

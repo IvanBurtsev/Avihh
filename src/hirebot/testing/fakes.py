@@ -33,6 +33,7 @@ from uuid import UUID
 
 from hirebot.config import Settings
 from hirebot.container import Container, UowFactory
+from hirebot.domain.budget import PaidAction
 from hirebot.domain.entities import (
     Booking,
     BusyInterval,
@@ -207,6 +208,7 @@ class InMemoryStore:
 
     companies: dict[UUID, Company] = field(default_factory=dict)
     profiles: dict[UUID, ScoringProfile] = field(default_factory=dict)
+    paid_actions: dict[UUID, PaidAction] = field(default_factory=dict)
     company_slugs: dict[str, UUID] = field(default_factory=dict)
     vacancies: dict[UUID, Vacancy] = field(default_factory=dict)
     vacancy_ids: dict[tuple[Channel, str], UUID] = field(default_factory=dict)
@@ -409,6 +411,26 @@ class InMemoryMessageRepository:
 
     async def exists_external_id(self, conversation_id: UUID, external_id: str) -> bool:
         return (conversation_id, external_id) in self._store.message_external_ids
+
+
+class InMemoryPaidActionRepository:
+    """Журнал списаний на словаре: сумма за период и запись."""
+
+    def __init__(self, store: InMemoryStore) -> None:
+        self._store = store
+
+    async def add(self, action: PaidAction) -> PaidAction:
+        self._store.paid_actions[action.id] = action
+        return action
+
+    async def spent_since(self, company_id: UUID, since: datetime) -> float:
+        return float(
+            sum(
+                item.cost
+                for item in self._store.paid_actions.values()
+                if item.company_id == company_id and item.created_at is not None and item.created_at >= since
+            )
+        )
 
 
 class InMemoryScoringProfileRepository:
@@ -843,6 +865,7 @@ class InMemoryUnitOfWork:
         self.clock = clock
         self.companies = InMemoryCompanyRepository(store)
         self.profiles = InMemoryScoringProfileRepository(store)
+        self.paid_actions = InMemoryPaidActionRepository(store)
         self.vacancies = InMemoryVacancyRepository(store)
         self.candidates = InMemoryCandidateRepository(store)
         self.resumes = InMemoryResumeRepository(store)
@@ -933,7 +956,14 @@ class FakeChannelAdapter:
     ``send_message`` идемпотентен по ``(conversation_external_id, idempotency_key)``
     — ровно как требует порт: повтор с тем же ключом возвращает прежний
     результат и не создаёт второе сообщение.
+
+    ``is_fake`` — признак демо-адаптера: он не обращается к площадке и не
+    списывает деньги. Бюджет платных действий опирается на этот флаг, иначе
+    тесты и демо упирались бы в лимиты, которых в реальности нет.
     """
+
+    #: Демо-адаптер не тратит платную квоту площадки.
+    is_fake: bool = True
 
     channel: Channel
 

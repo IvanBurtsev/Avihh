@@ -624,6 +624,7 @@ async def queue_page(
             uow, state=state_filter, limit=QUEUE_LIMIT, timezone=_timezone(settings)
         )
         pending_total = len(await uow.drafts.list_pending(limit=1000))
+    budget_summary = await _budget_summary(container)
 
     return _render(
         request,
@@ -634,6 +635,7 @@ async def queue_page(
             "active_nav": "queue",
             "pending_total": pending_total,
             "channels": [channel.value for channel in container.enabled_channels],
+            "budget": budget_summary,
         },
         settings=settings,
     )
@@ -739,6 +741,22 @@ async def conversation_page(
         {"view": view, "pending_total": pending_total},
         settings=settings,
     )
+
+
+async def _budget_summary(container: Container) -> Any:
+    """Расходы за сегодня и лимит — для плашки в шапке.
+
+    Ошибку не пробрасываем: недоступный бюджет не должен ломать страницу,
+    он просто не показывается.
+    """
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+    from hirebot.services.budget import BudgetService
+
+    try:
+        return await BudgetService(container).usage(DEFAULT_COMPANY_ID)
+    except Exception:
+        logger.warning("budget_summary_failed", exc_info=True)
+        return None
 
 
 def _channel_of(view: Any) -> Any:

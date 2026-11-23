@@ -23,6 +23,7 @@ from typing import Any
 from uuid import UUID
 
 from hirebot.container import Container
+from hirebot.domain.budget import PaidActionKind
 from hirebot.domain.entities import (
     Resume,
     ScreeningCriterion,
@@ -31,7 +32,12 @@ from hirebot.domain.entities import (
     new_id,
 )
 from hirebot.domain.enums import Channel, ScreeningVerdict
-from hirebot.domain.errors import ChannelNotConfigured, NotFound, ResumeAccessDenied
+from hirebot.domain.errors import (
+    BudgetExceeded,
+    ChannelNotConfigured,
+    NotFound,
+    ResumeAccessDenied,
+)
 from hirebot.domain.scoring import (
     CriterionScore,
     ProfileCriterion,
@@ -46,7 +52,13 @@ from hirebot.ports.channels import ChannelPort
 from hirebot.ports.dto import ResumePayload
 from hirebot.ports.llm import ScreeningDraft, ScreeningRequest
 from hirebot.services.base import ServiceBase
+from hirebot.services.budget import BudgetService
 from hirebot.services.policy import PolicyGuard
+from hirebot.services.prefilter import (
+    PrefilterSettings,
+    score_response,
+    should_skip_resume,
+)
 from hirebot.services.scoring_profile import ScoringProfileService
 
 logger = get_logger(__name__)
@@ -295,6 +307,11 @@ class ScreeningService(ServiceBase):
         ошибка, а сигнал «нужен человек».
         """
         context = await self._load(conversation_id)
+        skip_reason = self._prefilter_reason(context)
+        if skip_reason is not None:
+            # Платное открытие резюме пропускаем: отклик заведомо не по профилю.
+            # Это не отказ кандидату — решение остаётся за человеком.
+            return self._needs_review(context, skip_reason)
         resume = await self._ensure_resume(context)
         if resume is None:
             return self._needs_review(
@@ -396,6 +413,53 @@ class ScreeningService(ServiceBase):
     # ------------------------------------------------------------------ #
     # Внутреннее
     # ------------------------------------------------------------------ #
+
+    def _prefilter_reason(self, context: _ScreeningContext) -> str | None:
+        """Причина не открывать резюме — или ``None``, если открывать нужно.
+
+        Предскоринг имеет смысл только там, где открытие резюме стоит денег, и
+        только при наличии бесплатных данных (письмо, метаданные). Во всех
+        остальных случаях возвращаем ``None``: экономия не должна превращаться
+        в отказ от оценки.
+        """
+        budget = BudgetService(self._container)
+        if not budget.limits().enabled or not budget.is_chargeable(context.channel):
+            return None
+        resume = context.resume
+        if resume is None or not isinstance(resume.parsed, dict) or not resume.parsed:
+            return None
+
+        from hirebot.ports.dto import InboundResponse
+
+        response = InboundResponse(
+            channel=context.channel,
+            conversation_external_id=context.conversation_external_id,
+            candidate_external_id=str(context.candidate_id),
+            vacancy_external_id=context.vacancy.external_id,
+            resume_external_id=resume.external_id,
+            cover_letter=str(resume.parsed.get("cover_letter") or ""),
+            raw=resume.parsed,
+        )
+        settings = PrefilterSettings(enabled=True, min_score=self.settings.prefilter.min_score)
+        preliminary = score_response(
+            vacancy=context.vacancy,
+            response=response,
+            profile=context.profile,
+            settings=settings,
+        )
+        if not should_skip_resume(preliminary=preliminary, settings=settings):
+            return None
+        logger.info(
+            "prefilter_skipped_resume_view",
+            conversation_id=str(context.conversation_id),
+            score=preliminary.score,
+            matched=list(preliminary.matched),
+        )
+        return (
+            "Предскоринг отклика низкий "
+            f"({preliminary.score:.0f} из 100: {preliminary.reason}). "
+            "Резюме не открывалось, чтобы не тратить платную квоту. Нужен человек."
+        )
 
     def _profile_fingerprint(self, context: _ScreeningContext) -> str:
         """Отпечаток профиля для ключа кэша: версия и состав критериев.
@@ -508,7 +572,22 @@ class ScreeningService(ServiceBase):
 
         try:
             channel = self._channel(context.channel)
+            # Просмотр резюме на hh.ru и Avito может списывать деньги.
+            # Проверяем лимит **до** вызова: списание нельзя отменить.
+            budget = BudgetService(self._container)
+            await budget.ensure_allowed(
+                company_id=context.vacancy.company_id,
+                channel=context.channel,
+                kind=PaidActionKind.RESUME_VIEW,
+            )
             payload = await channel.fetch_resume(external_id)
+        except BudgetExceeded as exc:
+            logger.warning(
+                "resume_view_budget_exceeded",
+                conversation_id=str(context.conversation_id),
+                error=str(exc),
+            )
+            return None
         except ResumeAccessDenied as exc:
             logger.warning(
                 "resume_access_denied",
@@ -521,6 +600,13 @@ class ScreeningService(ServiceBase):
             logger.warning("channel_not_configured", channel=context.channel.value, error=str(exc))
             return None
 
+        # Списание записываем только после успешного получения резюме.
+        await BudgetService(self._container).record(
+            company_id=context.vacancy.company_id,
+            channel=context.channel,
+            kind=PaidActionKind.RESUME_VIEW,
+            reference=external_id,
+        )
         return await self._store_resume(context, resume, payload)
 
     async def _store_resume(

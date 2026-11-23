@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, exists, select
+from sqlalchemy import Select, exists, func, select
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -35,6 +35,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from hirebot.domain.budget import PaidAction
 from hirebot.domain.entities import (
     Booking,
     Candidate,
@@ -68,6 +69,7 @@ from hirebot.infra.db.models import (
     MessageDraftRow,
     MessageRow,
     OutboxRow,
+    PaidActionRow,
     ProfileCriterionRow,
     ProfileQuestionRow,
     ResumeRow,
@@ -481,6 +483,40 @@ class SqlMessageRepository(_BaseRepository):
             )
         )
         return bool(await self._session.scalar(stmt))
+
+
+# --- Paid actions (бюджет) ---------------------------------------------------
+
+
+class SqlPaidActionRepository(_BaseRepository):
+    """Журнал списаний: запись и сумма за период.
+
+    Сумма считается на стороне БД: при тысячах записей загрузка их в память
+    ради сложения — лишняя работа и лишняя память.
+    """
+
+    async def add(self, action: PaidAction) -> PaidAction:
+        row = PaidActionRow(
+            id=action.id,
+            company_id=action.company_id,
+            channel=action.channel,
+            kind=action.kind.value,
+            cost=action.cost,
+            reference=action.reference,
+            created_at=action.created_at or utcnow(),
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return action
+
+    async def spent_since(self, company_id: UUID, since: datetime) -> float:
+        total = await self._session.scalar(
+            select(func.coalesce(func.sum(PaidActionRow.cost), 0.0)).where(
+                PaidActionRow.company_id == company_id,
+                PaidActionRow.created_at >= since,
+            )
+        )
+        return float(total or 0.0)
 
 
 # --- Scoring profiles --------------------------------------------------------

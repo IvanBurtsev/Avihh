@@ -450,6 +450,28 @@ class ScreeningRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class PaidActionRow(Base):
+    """Журнал платных действий: сколько и за что списано.
+
+    Журнал, а не только счётчик: без него нельзя ответить на вопрос «за что
+    ушла квота» — а именно этот вопрос задают, когда приходит счёт.
+    """
+
+    __tablename__ = "paid_actions"
+    __table_args__ = (
+        Index("ix_paid_actions_company_created", "company_id", "created_at"),
+        Index("ix_paid_actions_company_kind", "company_id", "kind"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    cost: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    reference: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class BookingRow(Base):
     """Бронь собеседования.
 

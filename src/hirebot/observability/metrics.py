@@ -149,6 +149,8 @@ class _MetricSet:
     screening_scores: Histogram
     messages_sent: Counter
     messages_failed: Counter
+    paid_actions: Counter
+    paid_cost: Counter
     llm_calls: Counter
     llm_cache_events: Counter
     llm_latency: Histogram
@@ -221,6 +223,18 @@ def _build_metrics() -> _MetricSet:
         labelnames=("channel", "kind"),
         registry=registry,
     )
+    paid_actions = Counter(
+        f"{NAMESPACE}_paid_actions_total",
+        "Платные действия площадок (списания)",
+        labelnames=("kind", "channel"),
+        registry=registry,
+    )
+    paid_cost = Counter(
+        f"{NAMESPACE}_paid_cost_total",
+        "Сумма списаний площадок в единицах контактов",
+        labelnames=("kind", "channel"),
+        registry=registry,
+    )
     messages_failed = Counter(
         f"{NAMESPACE}_messages_failed_total",
         "Неудачные попытки отправки сообщений",
@@ -281,6 +295,8 @@ def _build_metrics() -> _MetricSet:
         screening_scores=screening_scores,
         messages_sent=messages_sent,
         messages_failed=messages_failed,
+        paid_actions=paid_actions,
+        paid_cost=paid_cost,
         llm_calls=llm_calls,
         llm_cache_events=llm_cache_events,
         llm_latency=llm_latency,
@@ -522,6 +538,21 @@ def record_screening(verdict: str, score: float) -> None:
     if not math.isfinite(numeric):
         return
     _safe_observe(metrics.screening_scores, min(100.0, max(0.0, numeric)))
+
+
+def record_paid_action(kind: str, channel: str, cost: float) -> None:
+    """Учесть платное действие площадки.
+
+    Стоимость может быть дробной (например, пакет контактов), поэтому она
+    прибавляется отдельным счётчиком, а не только инкрементом количества.
+    """
+    metrics = _current()
+    if metrics is None:
+        return
+    safe_cost = cost if cost > 0 and cost == cost else 0.0
+    metrics.paid_actions.labels(kind=kind, channel=channel).inc()
+    if safe_cost:
+        metrics.paid_cost.labels(kind=kind, channel=channel).inc(safe_cost)
 
 
 def record_message_sent(channel: str, kind: str) -> None:

@@ -178,6 +178,34 @@ class LlmSettings(BaseModel):
     send_pii: bool = False
 
 
+class BudgetSettings(BaseModel):
+    """Лимиты платных действий площадок.
+
+    Просмотр резюме и приглашение на hh.ru и Avito могут списывать деньги.
+    Дневной лимит — защита от «сгоревшей» квоты: при исчерпании действие
+    блокируется (``hard_stop``), а не просто пишется предупреждение.
+
+    ``enabled=False`` — режим демо, где каналы не списывают деньги.
+    """
+
+    enabled: bool = True
+    daily_limit: int = Field(default=100, ge=0, le=100_000)
+    monthly_limit: int = Field(default=2000, ge=0, le=1_000_000)
+    hard_stop: bool = True
+
+
+class PrefilterSettings(BaseModel):
+    """Предскоринг отклика до платного открытия резюме.
+
+    Работает по бесплатным данным: сопроводительному письму и метаданным
+    отклика. Низкий балл не означает отказ — резюме просто не открывается, а
+    решение принимает человек.
+    """
+
+    enabled: bool = True
+    min_score: float = Field(default=20.0, ge=0, le=100)
+
+
 class PolicySettings(BaseModel):
     """Правила, ограничивающие автономность бота.
 
@@ -242,6 +270,8 @@ class Settings(BaseSettings):
     llm: LlmSettings = Field(default_factory=LlmSettings)
     policy: PolicySettings = Field(default_factory=PolicySettings)
     privacy: PrivacySettings = Field(default_factory=PrivacySettings)
+    budget: BudgetSettings = Field(default_factory=BudgetSettings)
+    prefilter: PrefilterSettings = Field(default_factory=PrefilterSettings)
 
     @model_validator(mode="after")
     def _fail_fast_in_production(self) -> Settings:
