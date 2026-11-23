@@ -102,15 +102,21 @@
       {% include "_messages.html" %}
     </div>
 
-    <form method="post" action="/ui/conversations/{{ view.conversation_id }}/message" class="stack">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-      <label>
-        Сообщение кандидату
-        <textarea name="text" rows="4" maxlength="2000" required
-                  placeholder="Напишите сообщение — оно уйдёт в чат площадки"></textarea>
-      </label>
-      <button type="submit">Отправить</button>
-    </form>
+    {% if view.can_send %}
+      <form method="post" action="/ui/conversations/{{ view.conversation_id }}/message" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+        <label>
+          Сообщение кандидату
+          <textarea name="text" rows="4" maxlength="2000" required
+                    placeholder="Напишите сообщение — оно уйдёт в чат площадки"></textarea>
+        </label>
+        <button type="submit">Отправить</button>
+      </form>
+    {% else %}
+      <div class="banner warn" style="border-radius:6px">
+        {{ view.send_blocked_reason }}
+      </div>
+    {% endif %}
   </section>
 </div>
 

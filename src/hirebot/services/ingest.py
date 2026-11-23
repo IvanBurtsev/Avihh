@@ -21,7 +21,7 @@ from uuid import UUID
 from hirebot.container import Container
 from hirebot.domain.entities import Candidate, Conversation, OutboxEntry, Resume, Vacancy, new_id
 from hirebot.domain.enums import Channel, ConversationState
-from hirebot.domain.errors import ChannelUnavailable
+from hirebot.domain.errors import ChannelNotConfigured, ChannelUnavailable
 from hirebot.logging_setup import get_logger
 from hirebot.observability.metrics import record_response_ingested
 from hirebot.ports.channels import ChannelPort
@@ -326,6 +326,6 @@ class IngestService(ServiceBase):
     def _adapter_or_none(self, channel: Channel) -> ChannelPort | None:
         try:
             return self._container.channel(channel)
-        except KeyError:
+        except (ChannelNotConfigured, KeyError):
             logger.info("channel_not_configured", channel=channel.value)
             return None

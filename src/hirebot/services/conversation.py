@@ -1170,7 +1170,7 @@ class ConversationService(ServiceBase):
     def _channel(self, name: Channel) -> ChannelPort:
         try:
             return self._container.channel(name)
-        except KeyError as exc:
+        except (ChannelNotConfigured, KeyError) as exc:
             raise ChannelNotConfigured(str(exc)) from exc
 
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from hirebot.config import Settings, get_settings
 from hirebot.domain.enums import Channel
+from hirebot.domain.errors import ChannelNotConfigured
 from hirebot.logging_setup import get_logger
 from hirebot.ports.channels import CalendarPort, ChannelPort
 from hirebot.ports.infra import (
@@ -61,7 +62,8 @@ class Container:
         """Получить адаптер канала.
 
         Явная ошибка лучше ``KeyError``: если канал выключен в конфиге, это
-        нормальная ситуация, и сообщение должно объяснять причину.
+        нормальная ситуация, и сообщение должно объяснять причину. Ошибка
+        доменная — её ловит обработчик API и отдаёт понятный ответ вместо 500.
         """
         try:
             return self.channels[name]
@@ -71,7 +73,7 @@ class Container:
                 f"Включите его в .env (HIREBOT_{name.value.upper()}__ENABLED=true) "
                 f"и задайте учётные данные."
             )
-            raise KeyError(msg) from exc
+            raise ChannelNotConfigured(msg) from exc
 
     def require_calendar(self) -> CalendarPort:
         if self.calendar is None:

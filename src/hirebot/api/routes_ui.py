@@ -721,12 +721,34 @@ async def conversation_page(
             status_code=status.HTTP_404_NOT_FOUND,
         )
 
+    # Отправка возможна только через подключённый канал: иначе форма ведёт к
+    # ошибке после нажатия. Лучше показать причину заранее.
+    channel_name = _channel_of(view)
+    if channel_name in container.channels:
+        view.can_send = True
+    else:
+        view.can_send = False
+        view.send_blocked_reason = (
+            f"Канал {view.channel!r} не подключён: нет учётных данных. "
+            "Отправка станет доступна после настройки доступа к площадке."
+        )
+
     return _render(
         request,
         "conversation.html",
         {"view": view, "pending_total": pending_total},
         settings=settings,
     )
+
+
+def _channel_of(view: Any) -> Any:
+    """Канал диалога в терминах контейнера (Channel, а не строка)."""
+    from hirebot.domain.enums import Channel
+
+    try:
+        return Channel(view.channel)
+    except ValueError:  # pragma: no cover - защита от неизвестного значения
+        return None
 
 
 @router.get("/conversations/{conversation_id}/messages-fragment", response_class=HTMLResponse)
