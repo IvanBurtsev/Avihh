@@ -56,6 +56,7 @@ from hirebot.domain.errors import (
     NotFound,
     PolicyViolation,
 )
+from hirebot.domain.scoring import ScoringProfile
 from hirebot.logging_setup import get_logger
 from hirebot.observability.metrics import record_message_sent
 from hirebot.ports.channels import ChannelPort
@@ -113,6 +114,9 @@ SLOT_CHOICE_STATES: frozenset[ConversationState] = frozenset(
 HISTORY_FOR_LLM = 10
 
 #: Сколько сообщений читаем из БД, чтобы понять, что уже было в диалоге.
+#: Жёсткий предел вопросов кандидату: больше пяти не задаём никогда.
+MAX_PROFILE_QUESTIONS = 5
+
 MESSAGE_HISTORY_LIMIT = 100
 
 #: Максимальная длина исходящего сообщения (совпадает с дефолтом ``MessageRequest``).
@@ -236,6 +240,7 @@ class _Context:
     screening: ScreeningResult | None
     messages: list[Message]
     timezone: str
+    profile: ScoringProfile | None = None
 
     @property
     def display_name(self) -> str:
@@ -448,10 +453,9 @@ class ConversationService(ServiceBase):
                 detail="календарь не сконфигурирован или свободных слотов нет",
             )
 
-        if first_contact and screening.verdict is ScreeningVerdict.MATCH and screening.questions:
-            text, draft = await self._compose(
-                context, "clarifying_question", {"questions": list(screening.questions)}
-            )
+        questions = self._questions_for(context, screening)
+        if first_contact and screening.verdict is ScreeningVerdict.MATCH and questions:
+            text, draft = await self._compose(context, "clarifying_question", {"questions": list(questions)})
             return _Step(
                 current_state,
                 ConversationState.QUESTIONS_SENT,
@@ -961,6 +965,26 @@ class ConversationService(ServiceBase):
     # Чтение и вызовы внешнего мира
     # ------------------------------------------------------------------ #
 
+    def _questions_for(self, context: _Context, screening: ScreeningResult | None) -> list[str]:
+        """Вопросы кандидату: из профиля скоринга, иначе из скрининга.
+
+        Профиль — настройка рекрутера: он задаёт и текст вопроса, и критерий,
+        который тот уточняет. Скрининг остаётся запасным источником для вакансий
+        без профиля.
+
+        Лимит берётся из настроек профиля: «не больше пяти» — это правило
+        вакансии, а не константа в коде.
+        """
+        if context.profile is not None and context.profile.questions:
+            limit = context.profile.thresholds.max_questions
+            texts = [item.text for item in context.profile.questions][:limit]
+            if texts:
+                return texts
+        if screening is None:
+            return []
+        limit = self.settings.policy.max_auto_messages_per_candidate
+        return list(screening.questions)[: min(limit, MAX_PROFILE_QUESTIONS)]
+
     def _decide_shadow(self, profile: Any, screening: ScreeningResult | None) -> Any:
         """Рекомендация системы в shadow-режиме (без отправки кандидату).
 
@@ -1007,11 +1031,13 @@ class ConversationService(ServiceBase):
                 await uow.messages.list_for_conversation(conversation_id, limit=MESSAGE_HISTORY_LIMIT)
             )
 
+        # Профиль нужен и для инвалидации скрининга, и для вопросов кандидату,
+        # поэтому читаем его один раз независимо от наличия скрининга.
+        live_profile = await ScoringProfileService(self._container).get_live(conversation.vacancy_id)
         # Если профиль скоринга изменился, прежний результат больше не отражает
         # настройку: считаем, что скрининга нет, и оценим заново. Иначе кандидат
         # получил бы решение по старым критериям.
         if screening is not None:
-            live_profile = await ScoringProfileService(self._container).get_live(conversation.vacancy_id)
             current_version = live_profile.version if live_profile is not None else None
             if screening.profile_version != current_version:
                 logger.info(
@@ -1033,6 +1059,7 @@ class ConversationService(ServiceBase):
             resume=resume,
             screening=screening,
             messages=messages,
+            profile=live_profile,
             timezone=candidate_timezone(resume, self.settings.talantix.default_timezone),
         )
 

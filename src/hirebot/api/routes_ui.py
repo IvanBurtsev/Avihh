@@ -33,6 +33,11 @@ from hirebot.api.deps import (
     SchedulingServiceDep,
     SettingsDep,
 )
+from hirebot.api.scoring_forms import (
+    build_groups,
+    check_thresholds_order,
+    parse_scoring_form,
+)
 from hirebot.api.ui_security import (
     CSRF_COOKIE,
     SESSION_COOKIE,
@@ -470,45 +475,7 @@ async def scoring_page(
             }
 
     catalog = load_catalog(DEFAULT_CATALOG_PATH)
-    groups = []
-    for category_key, category in catalog.categories.items():
-        items = []
-        for criterion in catalog.by_category().get(category_key, []):
-            chosen = selected.get(criterion.key)
-            items.append(
-                {
-                    "key": criterion.key,
-                    "title": criterion.title,
-                    "question": criterion.question,
-                    "needs_lawyer": criterion.needs_lawyer,
-                    "selected": chosen is not None,
-                    "weight": chosen["weight"] if chosen else criterion.weight_hint,
-                    "must_have": chosen["must_have"] if chosen else criterion.must_have_hint,
-                }
-            )
-        extra = [item for item in selected if item not in {c.key for c in catalog.criteria}]
-        if extra:
-            logger.debug("scoring_custom_criteria", count=len(extra))
-        groups.append({"title": category.title, "criteria": items})
-
-    # Свои критерии (не из каталога) показываем отдельной группой.
-    custom_items = []
-    known = {item.key for item in catalog.criteria}
-    for key, value in selected.items():
-        if key not in known:
-            custom_items.append(
-                {
-                    "key": key,
-                    "title": value.get("title") or key,
-                    "question": value.get("expectation") or "",
-                    "needs_lawyer": False,
-                    "selected": True,
-                    "weight": value["weight"],
-                    "must_have": value["must_have"],
-                }
-            )
-    if custom_items:
-        groups.append({"title": "Свои критерии", "criteria": custom_items})
+    groups = build_groups(catalog, selected)
 
     existing_questions = list(profile.questions) if profile is not None else []
     question_slots = []
@@ -577,79 +544,18 @@ async def scoring_submit(
         )
 
     from hirebot.criteria import load_catalog
-    from hirebot.domain.enums import QuestionKind
-    from hirebot.domain.scoring import (
-        ProfileCriterion,
-        ProfileQuestion,
-        ProfileThresholds,
-    )
 
     catalog = load_catalog(DEFAULT_CATALOG_PATH)
-    by_key = {item.key: item for item in catalog.criteria}
-
-    criteria: list[ProfileCriterion] = []
-    position = 0
-    for key, known in by_key.items():
-        if form.get(f"selected_{key}") is None:
-            continue
-        weight = _int_or(form.get(f"weight_{key}"), known.weight_hint, low=1, high=5)
-        criteria.append(
-            ProfileCriterion(
-                key=key,
-                title=known.title,
-                weight=weight,
-                must_have=form.get(f"must_{key}") is not None,
-                evidence_hint=known.evidence_hint,
-                expectation=known.expectation or known.title,
-                source="catalog",
-                position=position,
-            )
-        )
-        position += 1
-
-    custom_title = str(form.get("custom_title") or "").strip()
-    custom_evidence = str(form.get("custom_evidence") or "").strip()
-    if custom_title and custom_evidence:
-        criteria.append(
-            ProfileCriterion(
-                key=f"custom_{position}",
-                title=custom_title,
-                weight=_int_or(form.get("custom_weight"), 3, low=1, high=5),
-                must_have=form.get("custom_must") is not None,
-                evidence_hint=custom_evidence,
-                expectation=custom_title,
-                source="custom",
-                position=position,
-            )
-        )
-
-    questions: list[ProfileQuestion] = []
-    for index in range(5):
-        text = str(form.get(f"question_text_{index}") or "").strip()
-        criterion_key = str(form.get(f"question_criterion_{index}") or "").strip()
-        if text and criterion_key:
-            questions.append(
-                ProfileQuestion(
-                    text=text,
-                    criterion_key=criterion_key,
-                    kind=QuestionKind.FACT,
-                    informativeness=2,
-                    is_custom=True,
-                    position=index,
-                )
-            )
-
-    thresholds = ProfileThresholds(
-        invite_at=float(_int_or(form.get("invite_at"), 85, low=0, high=100)),
-        human_at=float(_int_or(form.get("human_at"), 55, low=0, high=100)),
-        reject_at=float(_int_or(form.get("reject_at"), 40, low=0, high=100)),
-        auto_invite=form.get("auto_invite") is not None,
-        min_coverage_for_auto=_int_or(form.get("min_coverage"), 70, low=0, high=100) / 100.0,
-    )
-
-    if not criteria:
+    parsed = parse_scoring_form(form, catalog)
+    order_problem = check_thresholds_order(parsed)
+    if order_problem:
         return RedirectResponse(
-            url=_flash_url(path, "Выберите хотя бы один критерий", kind="warn"),
+            url=_flash_url(path, order_problem, kind="warn"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if not parsed.is_valid:
+        return RedirectResponse(
+            url=_flash_url(path, "; ".join(parsed.errors[:2]), kind="warn"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
@@ -657,9 +563,9 @@ async def scoring_submit(
     try:
         draft = await service.create_draft(
             vacancy=vacancy,
-            criteria=criteria,
-            questions=questions,
-            thresholds=thresholds,
+            criteria=parsed.criteria,
+            questions=parsed.questions,
+            thresholds=parsed.thresholds,
             created_by="recruiter",
         )
         if action == "publish":
