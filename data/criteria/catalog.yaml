@@ -421,7 +421,7 @@ criteria:
     category: documents
     kind: document
     question: Есть ли законное право на трудоустройство?
-    evidence_hint: Гражданство, разрешение на работу, патент, РВП, ВНЖ
+    evidence_hint: разрешение на работу, патент, РВП, ВНЖ, трудовая по ТК РФ
     measurable: high
     weight_hint: 3
     must_have_hint: false
@@ -495,6 +495,76 @@ criteria:
 
 # Критерии, которые использовать НЕЛЬЗЯ. Раздел существует, чтобы вопрос
 # «а можно ли отбирать по возрасту?» решался ссылкой, а не спором.
+  # --- Рабочие специальности ---------------------------------------------
+  # Не IT: уборка, погрузка, подсобные работы. Тот же справочник, просто
+  # другие критерии — система не делит профессии на «свои» и «чужие».
+
+  - key: cleaning_experience
+    title: Опыт уборки и клининга
+    category: tech
+    kind: experience
+    question: Где и сколько работали по уборке?
+    evidence_hint: уборка, клининг, уборщик, дворник, санитар
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: опыт уборки от полугода
+
+  - key: hand_tools
+    title: Владение инвентарём и инструментом
+    category: tech
+    kind: skill
+    question: Каким инвентарём и инструментом умеете пользоваться?
+    evidence_hint: инструмент, инвентарь, триммер, газонокосилка, метла, тележка
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: уверенное владение рабочим инвентарём
+
+  - key: physical_stamina
+    title: Физическая выносливость
+    category: conditions
+    kind: condition
+    question: Готовы к работе, связанной с физической нагрузкой?
+    evidence_hint: физическая работа, нагрузка, подъём тяжестей, активная работа
+    measurable: medium
+    weight_hint: 3
+    must_have_hint: true
+    expectation: готовность к физической работе в течение смены
+
+  - key: early_shifts
+    title: Готовность к ранним сменам
+    category: conditions
+    kind: condition
+    question: Устроит ли начало смены в 6-7 утра?
+    evidence_hint: ранняя смена, ранний график, с 6 утра, с 7 утра
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+    expectation: готовность начинать смену рано утром
+
+  - key: nearby_home
+    title: Проживание рядом с объектом
+    category: location
+    kind: location
+    question: Далеко ли добираться до объекта?
+    evidence_hint: район, рядом с домом, пешая доступность, метро
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: дорога до объекта не более часа
+
+  - key: team_work
+    title: Работа в бригаде
+    category: soft
+    kind: soft
+    question: Работали ли в бригаде или команде?
+    evidence_hint: бригада, команда, смена, коллектив
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: опыт работы в коллективе
+
 forbidden:
   - group: Пол и гендер
     reason: Дискриминация (ст. 3 ТК РФ, ст. 13.11.1 КоАП РФ)
