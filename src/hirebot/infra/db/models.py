@@ -311,6 +311,102 @@ class MessageDraftRow(Base):
     conversation: Mapped[ConversationRow] = relationship(back_populates="drafts", lazy="raise")
 
 
+class ScoringProfileRow(Base):
+    """Версия профиля скоринга вакансии.
+
+    Правки копятся в черновике и применяются публикацией: уже обработанные
+    кандидаты остаются посчитанными по своей версии. Без этого нельзя объяснить
+    прошлые решения — критерии к тому времени уже другие.
+    """
+
+    __tablename__ = "scoring_profiles"
+    __table_args__ = (
+        UniqueConstraint("vacancy_id", "version", name="uq_scoring_profiles_vacancy_version"),
+        # Одна «живая» версия на вакансию: одновременно активная и shadow-версия
+        # applied to candidates превратили бы решение в лотерею.
+        Index(
+            "uq_scoring_profiles_vacancy_live",
+            "vacancy_id",
+            unique=True,
+            sqlite_where=text("status IN ('active', 'shadow')"),
+            postgresql_where=text("status IN ('active', 'shadow')"),
+        ),
+        Index("ix_scoring_profiles_vacancy_status", "vacancy_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    vacancy_id: Mapped[UUID] = mapped_column(ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+
+    invite_at: Mapped[float] = mapped_column(Float, nullable=False, default=85.0)
+    human_at: Mapped[float] = mapped_column(Float, nullable=False, default=55.0)
+    reject_at: Mapped[float] = mapped_column(Float, nullable=False, default=40.0)
+    threshold_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="absolute")
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    max_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    auto_invite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    min_coverage_for_auto: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+
+    created_by: Mapped[str] = mapped_column(String(120), nullable=False, default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    criteria: Mapped[list[ProfileCriterionRow]] = relationship(
+        back_populates="profile", lazy="raise", cascade="all, delete-orphan"
+    )
+    questions: Mapped[list[ProfileQuestionRow]] = relationship(
+        back_populates="profile", lazy="raise", cascade="all, delete-orphan"
+    )
+
+
+class ProfileCriterionRow(Base):
+    """Критерий внутри профиля скоринга."""
+
+    __tablename__ = "profile_criteria"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "key", name="uq_profile_criteria_profile_key"),
+        Index("ix_profile_criteria_profile_position", "profile_id", "position"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    profile_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scoring_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    must_have: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    evidence_hint: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    expectation: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="catalog")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    profile: Mapped[ScoringProfileRow] = relationship(back_populates="criteria", lazy="raise")
+
+
+class ProfileQuestionRow(Base):
+    """Вопрос профиля, привязанный к критерию."""
+
+    __tablename__ = "profile_questions"
+    __table_args__ = (Index("ix_profile_questions_profile_position", "profile_id", "position"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    profile_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scoring_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    criterion_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="fact")
+    informativeness: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    profile: Mapped[ScoringProfileRow] = relationship(back_populates="questions", lazy="raise")
+
+
 class ScreeningRow(Base):
     """Результат скоринга резюме под вакансию.
 
@@ -333,6 +429,14 @@ class ScreeningRow(Base):
     )
     total_score: Mapped[float] = mapped_column(Float, nullable=False)
     verdict: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Процент соответствия (совпадает с total_score, вынесен явно для чтения).
+    percent: Mapped[float | None] = mapped_column(Float)
+    #: Уверенность: какая доля веса критериев подтверждена данными (0…1).
+    coverage: Mapped[float | None] = mapped_column(Float)
+    #: Провалы обязательных критериев: исключают автоматическое приглашение.
+    blockers: Mapped[list[str]] = mapped_column(json_type(), nullable=False, default=list)
+    #: Версия профиля скоринга, по которой принято решение.
+    profile_version: Mapped[int | None] = mapped_column(Integer)
     criteria: Mapped[list[dict[str, Any]]] = mapped_column(json_type(), nullable=False, default=list)
     summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     gaps: Mapped[list[str]] = mapped_column(json_type(), nullable=False, default=list)

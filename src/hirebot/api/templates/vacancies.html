@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Вакансии — AI-рекрутер{% endblock %}
+{% set active_nav = "vacancies" %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Вакансии</h1>
+    <p class="muted">Критерии скоринга настраиваются под каждую вакансию и версионируются.</p>
+  </div>
+</div>
+
+{% if vacancies %}
+  <table class="grid">
+    <thead>
+      <tr>
+        <th>Вакансия</th>
+        <th>Канал</th>
+        <th>Критерии</th>
+        <th>Профиль</th>
+        <th>Обновлена</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in vacancies %}
+        <tr>
+          <td>
+            <strong>{{ item.title }}</strong>
+            {% if item.city %}<div class="muted small">{{ item.city }}</div>{% endif %}
+          </td>
+          <td class="muted">{{ item.channel }}</td>
+          <td class="numeric">{{ item.criteria_count }}</td>
+          <td>
+            {% if item.profile_version %}
+              <span class="badge state-{{ 'booked' if item.profile_status == 'active' else 'human_review' }}">
+                v{{ item.profile_version }} · {{ item.profile_status }}
+              </span>
+            {% else %}
+              <span class="badge verdict-weak">не настроен</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ item.updated_at }}</td>
+          <td class="numeric">
+            <a href="/ui/vacancies/{{ item.id }}/scoring">Настроить критерии</a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="empty">
+    <p>Вакансий пока нет.</p>
+    <p class="muted">
+      Вакансии создаются через API (<code>POST /api/v1/vacancies</code>) или
+      <code>hirebot seed</code>. Экран создания вакансии — следующий шаг.
+    </p>
+  </div>
+{% endif %}
+{% endblock %}

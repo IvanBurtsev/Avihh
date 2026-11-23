@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Any
 from uuid import UUID
 
 from hirebot.container import Container
@@ -31,6 +32,14 @@ from hirebot.domain.entities import (
 )
 from hirebot.domain.enums import Channel, ScreeningVerdict
 from hirebot.domain.errors import ChannelNotConfigured, NotFound, ResumeAccessDenied
+from hirebot.domain.scoring import (
+    CriterionScore,
+    ProfileCriterion,
+    ScoringBreakdown,
+    ScoringProfile,
+    apply_must_have_cap,
+    compute_breakdown,
+)
 from hirebot.logging_setup import get_logger
 from hirebot.observability.metrics import record_screening
 from hirebot.ports.channels import ChannelPort
@@ -38,6 +47,7 @@ from hirebot.ports.dto import ResumePayload
 from hirebot.ports.llm import ScreeningDraft, ScreeningRequest
 from hirebot.services.base import ServiceBase
 from hirebot.services.policy import PolicyGuard
+from hirebot.services.scoring_profile import ScoringProfileService
 
 logger = get_logger(__name__)
 
@@ -148,7 +158,12 @@ def weighted_score(criteria: list[ScreeningCriterion]) -> float:
     return round(weighted / total_weight, 1)
 
 
-def evaluate_draft(draft: ScreeningDraft, *, min_score_to_invite: float) -> ScoringOutcome:
+def evaluate_draft(
+    draft: ScreeningDraft,
+    *,
+    min_score_to_invite: float,
+    score_override: float | None = None,
+) -> ScoringOutcome:
     """Пересчитать балл и вердикт по критериям из ответа модели.
 
     Правила вердикта (калибровка v2):
@@ -166,7 +181,15 @@ def evaluate_draft(draft: ScreeningDraft, *, min_score_to_invite: float) -> Scor
     * между ними → ``WEAK`` (пограничный случай, уходит человеку).
     """
     criteria = normalize_criteria(list(draft.criteria))
-    score = weighted_score(criteria) if criteria else _clamp_score(draft.total_score)
+    if score_override is not None:
+        # Процент уже посчитан по весам профиля и с учётом отсутствия данных.
+        # Вердикт обязан следовать ему, иначе карточка покажет одно, а решение
+        # будет принято по другому числу.
+        score = _clamp_score(score_override)
+    elif criteria:
+        score = weighted_score(criteria)
+    else:
+        score = _clamp_score(draft.total_score)
 
     must_have_failures = [criterion for criterion in criteria if criterion.must_have and criterion.is_gap]
     if must_have_failures:
@@ -253,6 +276,7 @@ class _ScreeningContext:
     candidate_id: UUID
     vacancy: Vacancy
     resume: Resume | None
+    profile: ScoringProfile | None = None
 
 
 class ScreeningService(ServiceBase):
@@ -277,7 +301,8 @@ class ScreeningService(ServiceBase):
                 context,
                 "Резюме недоступно: нет прав или квоты на просмотр. Нужен человек.",
             )
-        if not context.vacancy.criteria:
+        effective_criteria = self._effective_criteria(context)
+        if not effective_criteria:
             return self._needs_review(
                 context,
                 "У вакансии не заданы критерии скоринга: оценивать не по чему.",
@@ -285,7 +310,7 @@ class ScreeningService(ServiceBase):
 
         # Защищённые признаки проверяем до обращения к модели: нечего даже
         # отправлять, если критерий построен на поле или возрасте.
-        self._policy.assert_criteria_allowed(context.vacancy.criteria)
+        self._policy.assert_criteria_allowed(effective_criteria)
 
         # Quality-gate: мусорный или почти пустой текст не стоит денег и не
         # должен превращаться в «оценённый» вердикт. Модель не вызывается.
@@ -294,11 +319,18 @@ class ScreeningService(ServiceBase):
             return self._needs_review(
                 context,
                 gate_reason,
-                criteria=_all_criteria_as_gaps(context.vacancy.criteria),
+                criteria=_all_criteria_as_gaps(effective_criteria),
                 model=QUALITY_GATE_MODEL,
             )
 
-        content_hash = Resume.content_hash(resume.raw_text, vacancy_id=context.vacancy.id)
+        # Кэш привязан к версии профиля: после смены критериев старый результат
+        # недействителен, и отдавать его нельзя.
+        profile_fingerprint = self._profile_fingerprint(context)
+        content_hash = Resume.content_hash(
+            resume.raw_text,
+            vacancy_id=context.vacancy.id,
+            profile_fingerprint=profile_fingerprint,
+        )
         cached = await self._find_cached(content_hash)
         if cached is not None:
             logger.info(
@@ -311,22 +343,30 @@ class ScreeningService(ServiceBase):
         request = ScreeningRequest(
             vacancy_title=context.vacancy.title,
             vacancy_description=context.vacancy.description,
-            criteria=list(context.vacancy.criteria),
+            criteria=effective_criteria,
             resume_text=self._resume_text_for_llm(resume),
             content_hash=content_hash,
             prompt_version=SCREENING_PROMPT_VERSION,
         )
         draft = await self._container.llm.screen_resume(request)
-        outcome = evaluate_draft(
+        preliminary = evaluate_draft(
             draft,
             min_score_to_invite=self.settings.policy.min_score_to_invite,
         )
+        breakdown = self._build_breakdown(context, list(preliminary.criteria))
+        outcome = evaluate_draft(
+            draft,
+            min_score_to_invite=self.settings.policy.min_score_to_invite,
+            score_override=breakdown.percent,
+        )
+        # Процент из breakdown: он учитывает веса профиля и отсутствие данных.
+        # ``total_score`` остаётся для обратной совместимости и равен проценту.
         result = ScreeningResult(
             id=new_id(),
             resume_id=resume.id,
             vacancy_id=context.vacancy.id,
             candidate_id=context.candidate_id,
-            total_score=outcome.score,
+            total_score=breakdown.percent,
             verdict=outcome.verdict,
             criteria=outcome.criteria,
             summary=draft.summary,
@@ -335,6 +375,11 @@ class ScreeningService(ServiceBase):
             questions=list(draft.questions),
             model=self._draft_model(draft),
             prompt_version=request.prompt_version,
+            percent=breakdown.percent,
+            coverage=breakdown.coverage,
+            blockers=list(breakdown.blockers),
+            profile_version=context.profile.version if context.profile is not None else None,
+            content_hash=content_hash,
         )
         saved = await self._save(result)
         record_screening(saved.verdict.value, saved.total_score)
@@ -352,6 +397,79 @@ class ScreeningService(ServiceBase):
     # Внутреннее
     # ------------------------------------------------------------------ #
 
+    def _profile_fingerprint(self, context: _ScreeningContext) -> str:
+        """Отпечаток профиля для ключа кэша: версия и состав критериев.
+
+        Версии достаточно при штатной публикации, но состав добавлен на случай
+        правки профиля без смены версии: два разных набора критериев не должны
+        делить один результат скрининга.
+        """
+        if context.profile is None:
+            return "vacancy"
+        keys = ",".join(item.key for item in context.profile.criteria)
+        return f"v{context.profile.version}:{keys}"
+
+    def _effective_criteria(self, context: _ScreeningContext) -> list[dict[str, Any]]:
+        """Критерии, по которым оцениваем: профиль скоринга, иначе вакансия.
+
+        Профиль — это настройка, изменяемая рекрутером; ``vacancy.criteria``
+        остаётся источником для вакансий, созданных до появления версий.
+        """
+        if context.profile is not None and context.profile.criteria:
+            return [item.as_vacancy_dict() for item in context.profile.criteria]
+        return list(context.vacancy.criteria)
+
+    def _build_breakdown(
+        self, context: _ScreeningContext, model_criteria: list[ScreeningCriterion]
+    ) -> ScoringBreakdown:
+        """Посчитать процент, уверенность и блокеры по оценкам модели.
+
+        Критерий, по которому модель не дала оценки, считается **отсутствием
+        данных**, а не провалом: иначе кандидат получал бы блокер за то, что
+        модель промолчала. Но уверенность при этом падает, и решение уходит
+        человеку — что и требуется.
+        """
+        by_key = {item.key: item for item in model_criteria}
+        if context.profile is not None and context.profile.criteria:
+            criteria = list(context.profile.criteria)
+        else:
+            criteria = [
+                ProfileCriterion(
+                    key=item.key,
+                    title=item.title,
+                    weight=max(1, min(5, round(item.weight))),
+                    must_have=item.must_have,
+                    evidence_hint="",
+                    source="vacancy",
+                )
+                for item in model_criteria
+            ]
+
+        scores: dict[str, CriterionScore] = {}
+        for criterion in criteria:
+            found = by_key.get(criterion.key)
+            if found is None:
+                scores[criterion.key] = CriterionScore(
+                    key=criterion.key,
+                    title=criterion.title,
+                    weight=criterion.weight,
+                    score=0.0,
+                    must_have=criterion.must_have,
+                    evidence="",
+                    is_gap=False,
+                )
+                continue
+            scores[criterion.key] = CriterionScore(
+                key=criterion.key,
+                title=criterion.title,
+                weight=criterion.weight,
+                score=float(found.score),
+                must_have=criterion.must_have,
+                evidence=found.evidence,
+                is_gap=found.is_gap,
+            )
+        return apply_must_have_cap(compute_breakdown(criteria, scores))
+
     async def _load(self, conversation_id: UUID) -> _ScreeningContext:
         async with self.uow() as uow:
             conversation = await uow.conversations.get(conversation_id)
@@ -363,6 +481,7 @@ class ScreeningService(ServiceBase):
                 msg = f"Вакансия {conversation.vacancy_id} не найдена"
                 raise NotFound(msg)
             resume = await uow.resumes.get_latest_for_candidate(conversation.candidate_id)
+        profile = await ScoringProfileService(self._container).resolve_for_vacancy(vacancy)
         return _ScreeningContext(
             conversation_id=conversation.id,
             channel=conversation.channel,
@@ -370,6 +489,7 @@ class ScreeningService(ServiceBase):
             candidate_id=conversation.candidate_id,
             vacancy=vacancy,
             resume=resume,
+            profile=profile,
         )
 
     async def _ensure_resume(self, context: _ScreeningContext) -> Resume | None:

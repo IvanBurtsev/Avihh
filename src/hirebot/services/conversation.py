@@ -46,6 +46,7 @@ from hirebot.domain.enums import (
     ConversationState,
     MessageDirection,
     MessageKind,
+    ProfileStatus,
     ScreeningVerdict,
 )
 from hirebot.domain.errors import (
@@ -73,6 +74,7 @@ from hirebot.services.messaging import (
 )
 from hirebot.services.policy import PolicyGuard
 from hirebot.services.scheduling import DEFAULT_SLOT_LIMIT, SchedulingService
+from hirebot.services.scoring_profile import ScoringProfileService
 from hirebot.services.screening import NO_RESUME_ID, ScreeningService
 from hirebot.services.transitions import apply_transition
 
@@ -307,6 +309,28 @@ class ConversationService(ServiceBase):
             if screening.resume_id != NO_RESUME_ID and current_state in FIRST_CONTACT_STATES:
                 await self._mark_screened(conversation_id)
                 current_state = ConversationState.SCREENED
+
+        # Shadow-режим профиля: система считает и показывает рекомендацию, но
+        # ничего не отправляет. Это режим проверки на реальных кандидатах —
+        # без него первый запуск рисковал бы репутацией.
+        live_profile = await ScoringProfileService(self._container).get_live(context.vacancy.id)
+        if live_profile is not None and live_profile.status is ProfileStatus.SHADOW:
+            decision = self._decide_shadow(live_profile, screening)
+            logger.info(
+                "shadow_decision",
+                conversation_id=str(conversation_id),
+                percent=decision.percent,
+                recommendation=decision.decision.value,
+            )
+            return await self._force_human_review(
+                conversation_id,
+                reason=(
+                    f"режим проверки профиля: рекомендация «{decision.decision.value}», "
+                    f"соответствие {decision.percent:.0f}%, "
+                    f"уверенность {decision.coverage:.0%}. Отправка выключена."
+                ),
+                action="shadow_mode",
+            )
 
         new_inbound: list[InboundMessage] = []
         if current_state in DIALOGUE_STATES:
@@ -937,6 +961,36 @@ class ConversationService(ServiceBase):
     # Чтение и вызовы внешнего мира
     # ------------------------------------------------------------------ #
 
+    def _decide_shadow(self, profile: Any, screening: ScreeningResult | None) -> Any:
+        """Рекомендация системы в shadow-режиме (без отправки кандидату).
+
+        Ошибки метрики не должны ломать шаг: если посчитать не удалось, шаг всё
+        равно уходит человеку — это безопасное поведение.
+        """
+        from hirebot.domain.enums import DecisionKind
+        from hirebot.domain.scoring import DecisionOutcome
+
+        if screening is None:
+            return DecisionOutcome(
+                decision=DecisionKind.HUMAN,
+                percent=0.0,
+                coverage=0.0,
+                blockers=(),
+                stop_reason="shadow",
+                explanation="скрининг недоступен",
+            )
+        percent = screening.match_percent
+        coverage = screening.confidence
+        blockers = tuple(screening.blockers)
+        decision = profile.thresholds.decide(percent=percent, coverage=coverage, has_blocker=bool(blockers))
+        return DecisionOutcome(
+            decision=decision,
+            percent=percent,
+            coverage=coverage,
+            blockers=blockers,
+            stop_reason="shadow",
+        )
+
     async def _load(self, conversation_id: UUID) -> _Context | None:
         async with self.uow() as uow:
             conversation = await uow.conversations.get_with_lock(conversation_id)
@@ -952,6 +1006,21 @@ class ConversationService(ServiceBase):
             messages = list(
                 await uow.messages.list_for_conversation(conversation_id, limit=MESSAGE_HISTORY_LIMIT)
             )
+
+        # Если профиль скоринга изменился, прежний результат больше не отражает
+        # настройку: считаем, что скрининга нет, и оценим заново. Иначе кандидат
+        # получил бы решение по старым критериям.
+        if screening is not None:
+            live_profile = await ScoringProfileService(self._container).get_live(conversation.vacancy_id)
+            current_version = live_profile.version if live_profile is not None else None
+            if screening.profile_version != current_version:
+                logger.info(
+                    "screening_invalidated_by_profile_change",
+                    conversation_id=str(conversation_id),
+                    old_version=screening.profile_version,
+                    new_version=current_version,
+                )
+                screening = None
         return _Context(
             conversation_id=conversation.id,
             channel=conversation.channel,

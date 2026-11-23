@@ -112,10 +112,24 @@ class Resume:
     fetched_at: datetime = field(default_factory=_utcnow)
 
     @staticmethod
-    def content_hash(raw_text: str, *, vacancy_id: UUID | None = None) -> str:
+    def content_hash(
+        raw_text: str,
+        *,
+        vacancy_id: UUID | None = None,
+        profile_fingerprint: str | None = None,
+    ) -> str:
+        """Хэш содержимого для кэша скрининга.
+
+        В ключ входит **версия профиля скоринга**: если критерии или веса
+        изменились, старый результат больше не соответствует настройке, и
+        отдавать его нельзя — иначе кандидат получит оценку по прежним правилам.
+        """
         normalized = " ".join((raw_text or "").lower().split())
-        payload = f"{vacancy_id}:{normalized}" if vacancy_id else normalized
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        parts = [str(vacancy_id) if vacancy_id else ""]
+        if profile_fingerprint:
+            parts.append(profile_fingerprint)
+        parts.append(normalized)
+        return hashlib.sha256(":".join(parts).encode("utf-8")).hexdigest()
 
     @property
     def total_experience_months(self) -> int:
@@ -202,7 +216,33 @@ class ScreeningResult:
     model: str = "n/a"
     prompt_version: str = "v1"
     cache_hit: bool = False
+    #: Процент соответствия. Совпадает с ``total_score``, но вынесен явно:
+    #: процент — то, что показывается рекрутеру, и он должен читаться без
+    #: знания о старом поле.
+    percent: float | None = None
+    #: Уверенность 0…1: какая доля веса критериев подтверждена данными.
+    #: Процент без уверенности обманчив: 78% по 4 из 6 критериев и по всем
+    #: шести — разные кандидаты.
+    coverage: float | None = None
+    #: Провалы обязательных критериев: исключают автоматическое приглашение.
+    blockers: list[str] = field(default_factory=list)
+    #: Версия профиля скоринга, по которой принято решение.
+    profile_version: int | None = None
+    #: Ключ кэша скрининга. Считается сервисом, который знает версию профиля;
+    #: хранится в результате, чтобы повторное сохранение не пересчитывало его
+    #: по другим правилам и не ломало попадание в кэш.
+    content_hash: str | None = None
     created_at: datetime = field(default_factory=_utcnow)
+
+    @property
+    def match_percent(self) -> float:
+        """Процент для отображения (0…100)."""
+        return self.percent if self.percent is not None else self.total_score
+
+    @property
+    def confidence(self) -> float:
+        """Уверенность 0…1; при отсутствии данных считаем её полной для совместимости."""
+        return self.coverage if self.coverage is not None else 1.0
 
     @property
     def must_have_failures(self) -> list[ScreeningCriterion]:

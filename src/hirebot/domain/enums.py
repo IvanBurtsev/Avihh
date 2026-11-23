@@ -104,3 +104,64 @@ class DraftStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SUPERSEDED = "superseded"
+
+
+class ProfileStatus(StrEnum):
+    """Состояние профиля скоринга.
+
+    ``SHADOW`` — режим пилота: система считает и показывает результат, но ничего
+    не отправляет кандидату. Именно с него начинается запуск на реальных людях:
+    сначала сравниваем решения бота с решениями человека, потом включаем.
+    """
+
+    DRAFT = "draft"
+    SHADOW = "shadow"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class ThresholdMode(StrEnum):
+    """Как применяются пороги.
+
+    ``ABSOLUTE`` — по проценту. ``RELATIVE`` — по месту среди откликнувшихся
+    (топ-K), что нужно при массовом подборе, когда все кандидаты сильные
+    или все слабые.
+    """
+
+    ABSOLUTE = "absolute"
+    RELATIVE = "relative"
+
+
+class QuestionKind(StrEnum):
+    """Тип вопроса — влияет на формулировку и на разбор ответа."""
+
+    FACT = "fact"
+    PREFERENCE = "preference"
+    CONDITION = "condition"
+    EXPERIENCE = "experience"
+
+
+class DecisionKind(StrEnum):
+    """Итоговое решение после скоринга и вопросов."""
+
+    INVITE = "invite"
+    HUMAN = "human"
+    REJECT = "reject"
+    NO_DATA = "no_data"
+
+
+class StopReason(StrEnum):
+    """Почему бот перестал задавать вопросы.
+
+    Нужен для объяснимости: рекрутер видит не только «спросили 2», но и почему
+    не спросили остальные три.
+    """
+
+    LIMIT_REACHED = "limit_reached"
+    DECISION_STABLE = "decision_stable"
+    BLOCKER_FOUND = "blocker_found"
+    CONTRADICTION = "contradiction"
+    UNCLEAR_TWICE = "unclear_twice"
+    CANDIDATE_ASKED = "candidate_asked"
+    TIMEOUT = "timeout"
+    NO_QUESTIONS = "no_questions"

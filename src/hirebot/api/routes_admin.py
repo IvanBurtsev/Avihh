@@ -39,16 +39,25 @@ from hirebot.api.schemas import (
     ConversationCard,
     ConversationListResponse,
     ConversationSummary,
+    CriterionConfigSchema,
     DraftListResponse,
     DraftSchema,
     ManualMessageAccepted,
     ManualMessageRequest,
     MessageSchema,
     PollResponse,
+    PublishProfileRequest,
+    QuestionConfigSchema,
+    QueueItemSchema,
+    QueueResponse,
     RejectDraftRequest,
+    ScoringProfileDraftRequest,
+    ScoringProfileSchema,
     ScreeningSchema,
     SlotProposalRequest,
     SlotSchema,
+    ThresholdsSchema,
+    VacancyCreateRequest,
     VacancySchema,
 )
 from hirebot.container import Container
@@ -225,6 +234,289 @@ async def book_interview_route(
         slot_index=None if request.slot_start is not None else request.slot_index,
     )
     return BookingSchema.from_entity(booking)
+
+
+# ---------------------------------------------------------------------------
+# Вакансии и профиль скоринга
+# ---------------------------------------------------------------------------
+
+
+def _scoring_service(container: Container) -> Any:
+    return resolve_service("hirebot.services.scoring_profile", "ScoringProfileService", container)
+
+
+def _priority_service(container: Container) -> Any:
+    return resolve_service("hirebot.services.priority", "PriorityService", container)
+
+
+def _profile_to_schema(profile: Any) -> ScoringProfileSchema:
+
+    return ScoringProfileSchema(
+        id=profile.id,
+        vacancy_id=profile.vacancy_id,
+        version=profile.version,
+        status=profile.status.value,
+        criteria=[
+            CriterionConfigSchema(
+                key=item.key,
+                title=item.title,
+                weight=item.weight,
+                must_have=item.must_have,
+                evidence_hint=item.evidence_hint,
+                expectation=item.expectation,
+                source=item.source,
+            )
+            for item in profile.criteria
+        ],
+        questions=[
+            QuestionConfigSchema(
+                text=item.text,
+                criterion_key=item.criterion_key,
+                kind=item.kind.value,
+                informativeness=item.informativeness,
+                is_custom=item.is_custom,
+            )
+            for item in profile.questions
+        ],
+        thresholds=ThresholdsSchema(
+            invite_at=profile.thresholds.invite_at,
+            human_at=profile.thresholds.human_at,
+            reject_at=profile.thresholds.reject_at,
+            mode=profile.thresholds.mode.value,
+            top_k=profile.thresholds.top_k,
+            max_questions=profile.thresholds.max_questions,
+            auto_invite=profile.thresholds.auto_invite,
+            min_coverage_for_auto=profile.thresholds.min_coverage_for_auto,
+        ),
+        created_by=profile.created_by,
+        comment=profile.comment,
+        published_at=profile.published_at,
+    )
+
+
+@router.post("/vacancies", response_model=VacancySchema, summary="Создать вакансию")
+async def create_vacancy_route(
+    container: ContainerDep,
+    payload: VacancyCreateRequest,
+) -> VacancySchema:
+    """Создать вакансию в системе.
+
+    ``external_id`` генерируется: вакансия заводится вручную, а не приходит с
+    площадки. Критерии задаются отдельно — через профиль скоринга.
+    """
+    from uuid import uuid4
+
+    from hirebot.domain.entities import Vacancy, new_id
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+
+    channel = Channel(payload.channel) if payload.channel in {"hh", "avito"} else Channel.HH
+    company_id = payload.company_id or DEFAULT_COMPANY_ID
+    vacancy = Vacancy(
+        id=new_id(),
+        channel=channel,
+        external_id=f"manual-{uuid4().hex[:12]}",
+        title=payload.title,
+        company_id=company_id,
+        description=payload.description,
+        city=payload.city,
+    )
+    async with container.uow_factory() as uow:
+        await uow.companies.upsert(
+            __import__("hirebot.domain.entities", fromlist=["Company"]).Company(
+                id=company_id, name="Компания", slug=f"company-{company_id.hex[:8]}"
+            )
+        )
+        saved = await uow.vacancies.upsert(vacancy)
+        await uow.commit()
+    logger.info("vacancy_created", vacancy_id=str(saved.id))
+    return VacancySchema.model_validate(saved)
+
+
+@router.get("/vacancies", response_model=list[VacancySchema], summary="Список вакансий")
+async def list_vacancies_route(
+    container: ContainerDep,
+    company_id: UUID | None = None,
+) -> list[VacancySchema]:
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+
+    async with container.uow_factory() as uow:
+        vacancies = await uow.vacancies.list_active(company_id or DEFAULT_COMPANY_ID)
+    return [VacancySchema.model_validate(item) for item in vacancies]
+
+
+@router.get(
+    "/vacancies/{vacancy_id}/scoring",
+    response_model=ScoringProfileSchema,
+    summary="Активный профиль скоринга вакансии",
+    responses={404: {"description": "Профиль не задан"}},
+)
+async def get_scoring_route(vacancy_id: UUID, container: ContainerDep) -> ScoringProfileSchema:
+    service = _scoring_service(container)
+    profile = await service.get_live(vacancy_id)
+    if profile is None:
+        draft = await service.get_draft(vacancy_id)
+        if draft is None:
+            raise NotFound("У вакансии нет профиля скоринга: критерии не настроены")
+        profile = draft
+    return _profile_to_schema(profile)
+
+
+@router.put(
+    "/vacancies/{vacancy_id}/scoring/draft",
+    response_model=ScoringProfileSchema,
+    summary="Сохранить черновик профиля",
+)
+async def save_scoring_draft_route(
+    vacancy_id: UUID,
+    container: ContainerDep,
+    payload: ScoringProfileDraftRequest,
+) -> ScoringProfileSchema:
+    """Сохранить черновик новой версии профиля.
+
+    Проверки (дискриминация, обязательный критерий, лимит вопросов) выполняются
+    здесь же: черновик с ошибками не должен попасть в базу.
+    """
+    from hirebot.domain.enums import QuestionKind, ThresholdMode
+    from hirebot.domain.scoring import (
+        ProfileCriterion,
+        ProfileQuestion,
+        ProfileThresholds,
+    )
+
+    async with container.uow_factory() as uow:
+        vacancy = await uow.vacancies.get(vacancy_id)
+    if vacancy is None:
+        raise NotFound(f"Вакансия {vacancy_id} не найдена")
+
+    thresholds_payload = payload.thresholds
+    thresholds = ProfileThresholds(
+        invite_at=thresholds_payload.invite_at,
+        human_at=thresholds_payload.human_at,
+        reject_at=thresholds_payload.reject_at,
+        mode=ThresholdMode(thresholds_payload.mode)
+        if thresholds_payload.mode in {item.value for item in ThresholdMode}
+        else ThresholdMode.ABSOLUTE,
+        top_k=thresholds_payload.top_k,
+        max_questions=thresholds_payload.max_questions,
+        auto_invite=thresholds_payload.auto_invite,
+        min_coverage_for_auto=thresholds_payload.min_coverage_for_auto,
+    )
+    criteria = [
+        ProfileCriterion(
+            key=item.key,
+            title=item.title,
+            weight=item.weight,
+            must_have=item.must_have,
+            evidence_hint=item.evidence_hint,
+            expectation=item.expectation,
+            source=item.source,
+        )
+        for item in payload.criteria
+    ]
+    questions = [
+        ProfileQuestion(
+            text=item.text,
+            criterion_key=item.criterion_key,
+            kind=QuestionKind(item.kind)
+            if item.kind in {value.value for value in QuestionKind}
+            else QuestionKind.FACT,
+            informativeness=item.informativeness,
+            is_custom=item.is_custom,
+        )
+        for item in payload.questions
+    ]
+
+    saved = await _scoring_service(container).create_draft(
+        vacancy=vacancy,
+        criteria=criteria,
+        questions=questions,
+        thresholds=thresholds,
+        created_by=payload.created_by,
+        comment=payload.comment,
+    )
+    return _profile_to_schema(saved)
+
+
+@router.post(
+    "/vacancies/{vacancy_id}/scoring/publish",
+    response_model=ScoringProfileSchema,
+    summary="Опубликовать профиль",
+)
+async def publish_scoring_route(
+    vacancy_id: UUID,
+    container: ContainerDep,
+    payload: PublishProfileRequest | None = None,
+) -> ScoringProfileSchema:
+    """Опубликовать черновик.
+
+    По умолчанию — в shadow-режиме: система считает и показывает, но кандидатам
+    ничего не отправляется. Это режим первого запуска.
+    """
+    request = payload or PublishProfileRequest()
+    service = _scoring_service(container)
+    draft = await service.get_draft(vacancy_id)
+    if draft is None:
+        raise NotFound("Нет черновика для публикации")
+    published = await service.publish(draft.id, as_shadow=request.as_shadow)
+    return _profile_to_schema(published)
+
+
+@router.get(
+    "/vacancies/{vacancy_id}/scoring/versions",
+    response_model=list[ScoringProfileSchema],
+    summary="История версий профиля",
+)
+async def list_scoring_versions_route(
+    vacancy_id: UUID, container: ContainerDep
+) -> list[ScoringProfileSchema]:
+    versions = await _scoring_service(container).list_versions(vacancy_id)
+    return [_profile_to_schema(item) for item in versions]
+
+
+@router.post(
+    "/vacancies/{vacancy_id}/scoring/rollback",
+    response_model=ScoringProfileSchema,
+    summary="Откатить на прежнюю версию",
+)
+async def rollback_scoring_route(
+    vacancy_id: UUID,
+    container: ContainerDep,
+    version: int,
+) -> ScoringProfileSchema:
+    restored = await _scoring_service(container).rollback(vacancy_id, version)
+    return _profile_to_schema(restored)
+
+
+@router.get("/queue", response_model=QueueResponse, summary="Очередь по приоритету")
+async def queue_route(
+    container: ContainerDep,
+    vacancy_id: UUID | None = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> QueueResponse:
+    """Кандидаты, отсортированные по приоритету: кому писать первым."""
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+
+    items = await _priority_service(container).queue(
+        company_id=DEFAULT_COMPANY_ID, vacancy_id=vacancy_id, limit=limit
+    )
+    return QueueResponse(
+        total=len(items),
+        items=[
+            QueueItemSchema(
+                conversation_id=item.conversation_id,
+                candidate_name=item.candidate_name,
+                state=item.state.value,
+                percent=item.percent,
+                coverage=item.coverage,
+                priority=item.priority,
+                blockers=list(item.blockers),
+                age_hours=item.age_hours,
+                contributions=item.contributions,
+                vacancy_title=item.vacancy_title,
+            )
+            for item in items
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------

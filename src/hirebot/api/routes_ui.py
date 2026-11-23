@@ -45,9 +45,16 @@ from hirebot.api.ui_security import (
     safe_next,
     verify_csrf,
 )
-from hirebot.api.ui_views import build_conversation, build_queue, draft_view, slots_view
+from hirebot.api.ui_views import (
+    build_conversation,
+    build_queue,
+    draft_view,
+    format_moment,
+    slots_view,
+)
 from hirebot.config import Settings
 from hirebot.container import Container
+from hirebot.criteria import DEFAULT_CATALOG_PATH
 from hirebot.domain.enums import Channel, ConversationState
 from hirebot.domain.errors import (
     ChannelNotConfigured,
@@ -358,6 +365,328 @@ async def reject_draft(
         url=_flash_url("/ui/approvals", "Черновик отклонён", kind="info"),
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+# ---------------------------------------------------------------------------
+# Вакансии и настройка критериев
+# ---------------------------------------------------------------------------
+
+
+def _scoring_service(container: Container) -> Any:
+    from hirebot.services.scoring_profile import ScoringProfileService
+
+    return ScoringProfileService(container)
+
+
+@router.get("/vacancies", response_class=HTMLResponse)
+async def vacancies_page(
+    request: Request,
+    settings: SettingsDep,
+    container: ContainerDep,
+) -> Response:
+    """Список вакансий и состояние их профилей скоринга."""
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+
+    service = _scoring_service(container)
+    async with container.uow_factory() as uow:
+        vacancies = await uow.vacancies.list_active(listing_company())
+    rows = []
+    for vacancy in vacancies:
+        live = await service.get_live(vacancy.id)
+        draft = await service.get_draft(vacancy.id)
+        profile = live or draft
+        rows.append(
+            {
+                "id": vacancy.id,
+                "title": vacancy.title,
+                "city": vacancy.city,
+                "channel": vacancy.channel.value,
+                "criteria_count": len(profile.criteria) if profile else len(vacancy.criteria),
+                "profile_version": profile.version if profile else None,
+                "profile_status": profile.status.value if profile else None,
+                "updated_at": format_moment(vacancy.updated_at, timezone=_timezone(settings)),
+            }
+        )
+    return _render(
+        request,
+        "vacancies.html",
+        {"vacancies": rows, "active_nav": "vacancies"},
+        settings=settings,
+    )
+
+
+def listing_company() -> UUID:
+    """Компания по умолчанию для списка вакансий.
+
+    Мультитенантность заложена в схему, но выбора компании в интерфейсе пока
+    нет: используется та же компания, что и в воркере.
+    """
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+
+    return DEFAULT_COMPANY_ID
+
+
+def _criterion_form_name(prefix: str, key: str) -> str:
+    return f"{prefix}_{key}"
+
+
+@router.get("/vacancies/{vacancy_id}/scoring", response_class=HTMLResponse)
+async def scoring_page(
+    request: Request,
+    vacancy_id: UUID,
+    settings: SettingsDep,
+    container: ContainerDep,
+) -> Response:
+    """Экран настройки критериев: три шага в одной форме."""
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+
+    from hirebot.criteria import load_catalog
+
+    async with container.uow_factory() as uow:
+        vacancy = await uow.vacancies.get(vacancy_id)
+    if vacancy is None:
+        return RedirectResponse(
+            url=_flash_url("/ui/vacancies", "Вакансия не найдена", kind="warn"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    service = _scoring_service(container)
+    live = await service.get_live(vacancy_id)
+    draft = await service.get_draft(vacancy_id)
+    profile = draft or live
+
+    selected: dict[str, dict[str, Any]] = {}
+    if profile is not None:
+        for item in profile.criteria:
+            selected[item.key] = {
+                "weight": item.weight,
+                "must_have": item.must_have,
+                "title": item.title,
+                "expectation": item.expectation,
+            }
+
+    catalog = load_catalog(DEFAULT_CATALOG_PATH)
+    groups = []
+    for category_key, category in catalog.categories.items():
+        items = []
+        for criterion in catalog.by_category().get(category_key, []):
+            chosen = selected.get(criterion.key)
+            items.append(
+                {
+                    "key": criterion.key,
+                    "title": criterion.title,
+                    "question": criterion.question,
+                    "needs_lawyer": criterion.needs_lawyer,
+                    "selected": chosen is not None,
+                    "weight": chosen["weight"] if chosen else criterion.weight_hint,
+                    "must_have": chosen["must_have"] if chosen else criterion.must_have_hint,
+                }
+            )
+        extra = [item for item in selected if item not in {c.key for c in catalog.criteria}]
+        if extra:
+            logger.debug("scoring_custom_criteria", count=len(extra))
+        groups.append({"title": category.title, "criteria": items})
+
+    # Свои критерии (не из каталога) показываем отдельной группой.
+    custom_items = []
+    known = {item.key for item in catalog.criteria}
+    for key, value in selected.items():
+        if key not in known:
+            custom_items.append(
+                {
+                    "key": key,
+                    "title": value.get("title") or key,
+                    "question": value.get("expectation") or "",
+                    "needs_lawyer": False,
+                    "selected": True,
+                    "weight": value["weight"],
+                    "must_have": value["must_have"],
+                }
+            )
+    if custom_items:
+        groups.append({"title": "Свои критерии", "criteria": custom_items})
+
+    existing_questions = list(profile.questions) if profile is not None else []
+    question_slots = []
+    for index in range(5):
+        item = existing_questions[index] if index < len(existing_questions) else None
+        question_slots.append(
+            {
+                "index": index,
+                "criterion_key": item.criterion_key if item else "",
+                "text": item.text if item else "",
+            }
+        )
+
+    thresholds = (
+        profile.thresholds
+        if profile is not None
+        else __import__("hirebot.domain.scoring", fromlist=["ProfileThresholds"]).ProfileThresholds()
+    )
+
+    selectable = [
+        {"key": item.key, "title": item.title} for item in (profile.criteria if profile is not None else [])
+    ] or [{"key": item.key, "title": item.title} for item in catalog.criteria]
+
+    return _render(
+        request,
+        "scoring.html",
+        {
+            "vacancy_id": vacancy.id,
+            "vacancy_title": vacancy.title,
+            "groups": groups,
+            "selected_count": len(selected),
+            "question_slots": question_slots,
+            "selectable_criteria": selectable,
+            "thresholds": thresholds,
+            "profile": profile,
+            "active_nav": "vacancies",
+        },
+        settings=settings,
+    )
+
+
+@router.post("/vacancies/{vacancy_id}/scoring")
+async def scoring_submit(
+    request: Request,
+    vacancy_id: UUID,
+    settings: SettingsDep,
+    container: ContainerDep,
+    csrf: Annotated[str | None, Form(alias="csrf_token")] = None,
+    action: Annotated[str, Form()] = "draft",
+) -> Response:
+    """Сохранить черновик профиля и (опционально) опубликовать в shadow-режиме."""
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+    verify_csrf(request, csrf)
+
+    path = f"/ui/vacancies/{vacancy_id}/scoring"
+    form = await request.form()
+
+    async with container.uow_factory() as uow:
+        vacancy = await uow.vacancies.get(vacancy_id)
+    if vacancy is None:
+        return RedirectResponse(
+            url=_flash_url("/ui/vacancies", "Вакансия не найдена", kind="warn"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    from hirebot.criteria import load_catalog
+    from hirebot.domain.enums import QuestionKind
+    from hirebot.domain.scoring import (
+        ProfileCriterion,
+        ProfileQuestion,
+        ProfileThresholds,
+    )
+
+    catalog = load_catalog(DEFAULT_CATALOG_PATH)
+    by_key = {item.key: item for item in catalog.criteria}
+
+    criteria: list[ProfileCriterion] = []
+    position = 0
+    for key, known in by_key.items():
+        if form.get(f"selected_{key}") is None:
+            continue
+        weight = _int_or(form.get(f"weight_{key}"), known.weight_hint, low=1, high=5)
+        criteria.append(
+            ProfileCriterion(
+                key=key,
+                title=known.title,
+                weight=weight,
+                must_have=form.get(f"must_{key}") is not None,
+                evidence_hint=known.evidence_hint,
+                expectation=known.expectation or known.title,
+                source="catalog",
+                position=position,
+            )
+        )
+        position += 1
+
+    custom_title = str(form.get("custom_title") or "").strip()
+    custom_evidence = str(form.get("custom_evidence") or "").strip()
+    if custom_title and custom_evidence:
+        criteria.append(
+            ProfileCriterion(
+                key=f"custom_{position}",
+                title=custom_title,
+                weight=_int_or(form.get("custom_weight"), 3, low=1, high=5),
+                must_have=form.get("custom_must") is not None,
+                evidence_hint=custom_evidence,
+                expectation=custom_title,
+                source="custom",
+                position=position,
+            )
+        )
+
+    questions: list[ProfileQuestion] = []
+    for index in range(5):
+        text = str(form.get(f"question_text_{index}") or "").strip()
+        criterion_key = str(form.get(f"question_criterion_{index}") or "").strip()
+        if text and criterion_key:
+            questions.append(
+                ProfileQuestion(
+                    text=text,
+                    criterion_key=criterion_key,
+                    kind=QuestionKind.FACT,
+                    informativeness=2,
+                    is_custom=True,
+                    position=index,
+                )
+            )
+
+    thresholds = ProfileThresholds(
+        invite_at=float(_int_or(form.get("invite_at"), 85, low=0, high=100)),
+        human_at=float(_int_or(form.get("human_at"), 55, low=0, high=100)),
+        reject_at=float(_int_or(form.get("reject_at"), 40, low=0, high=100)),
+        auto_invite=form.get("auto_invite") is not None,
+        min_coverage_for_auto=_int_or(form.get("min_coverage"), 70, low=0, high=100) / 100.0,
+    )
+
+    if not criteria:
+        return RedirectResponse(
+            url=_flash_url(path, "Выберите хотя бы один критерий", kind="warn"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    service = _scoring_service(container)
+    try:
+        draft = await service.create_draft(
+            vacancy=vacancy,
+            criteria=criteria,
+            questions=questions,
+            thresholds=thresholds,
+            created_by="recruiter",
+        )
+        if action == "publish":
+            await service.publish(draft.id, as_shadow=True)
+    except (ValueError, DomainError) as exc:
+        message, kind = _domain_error_message(exc) if isinstance(exc, DomainError) else (str(exc), "warn")
+        logger.warning("scoring_save_failed", vacancy_id=str(vacancy_id), error=str(exc))
+        return RedirectResponse(
+            url=_flash_url(path, message, kind=kind), status_code=status.HTTP_303_SEE_OTHER
+        )
+
+    text = (
+        f"Профиль v{draft.version} опубликован в режиме проверки (shadow)"
+        if action == "publish"
+        else f"Черновик v{draft.version} сохранён"
+    )
+    logger.info("scoring_saved", vacancy_id=str(vacancy_id), version=draft.version, action=action)
+    return RedirectResponse(url=_flash_url(path, text, kind="ok"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+def _int_or(value: object, default: int, *, low: int, high: int) -> int:
+    """Безопасно превратить значение формы в целое в заданных границах."""
+    try:
+        parsed = int(str(value))
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, parsed))
 
 
 # ---------------------------------------------------------------------------

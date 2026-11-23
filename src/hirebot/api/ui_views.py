@@ -125,6 +125,27 @@ class ScreeningView:
     questions: list[str]
     model: str
     prompt_version: str
+    #: Процент соответствия и уверенность: два числа, потому что одно врёт.
+    percent: float | None = None
+    coverage: float | None = None
+    blockers: list[str] = field(default_factory=list)
+    profile_version: int | None = None
+
+    @property
+    def confidence_label(self) -> str:
+        """Уверенность словами: рекрутеру понятнее, чем дробь."""
+        if self.coverage is None:
+            return "—"
+        percent = round(self.coverage * 100)
+        if percent >= 80:
+            return f"высокая ({percent}%)"
+        if percent >= 50:
+            return f"средняя ({percent}%)"
+        return f"низкая ({percent}%)"
+
+    @property
+    def needs_more_data(self) -> bool:
+        return self.coverage is not None and self.coverage < 0.7
 
 
 @dataclass(slots=True)
@@ -241,6 +262,10 @@ def screening_view(result: ScreeningResult) -> ScreeningView:
         questions=list(result.questions),
         model=result.model,
         prompt_version=result.prompt_version,
+        percent=result.match_percent,
+        coverage=result.coverage,
+        blockers=list(result.blockers),
+        profile_version=result.profile_version,
     )
 
 

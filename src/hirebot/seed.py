@@ -36,12 +36,16 @@ from hirebot.domain.enums import (
     MessageKind,
 )
 from hirebot.logging_setup import get_logger
+from hirebot.services.base import DEFAULT_COMPANY_ID
 from hirebot.services.screening import ScreeningService
 
 logger = get_logger(__name__)
 
 #: Компания демо-данных. Один идентификатор, чтобы сценарии были воспроизводимы.
-DEMO_COMPANY_ID = __import__("uuid").UUID("00000000-0000-4000-8000-000000000001")
+#: Компания демо-данных — та же, что использует система по умолчанию.
+#: Иначе демо-вакансии не видны в интерфейсе и очереди: они лежат в другой
+#: компании, и фильтрация по арендатору их отсекает.
+DEMO_COMPANY_ID = DEFAULT_COMPANY_ID
 
 VACANCY_TITLE = "Python-разработчик"
 VACANCY_DESCRIPTION = (

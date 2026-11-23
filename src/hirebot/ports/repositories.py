@@ -28,6 +28,7 @@ from hirebot.domain.entities import (
     Vacancy,
 )
 from hirebot.domain.enums import Channel, ConversationState, OutboxStatus
+from hirebot.domain.scoring import ScoringProfile
 
 
 @runtime_checkable
@@ -145,6 +146,36 @@ class MessageDraftRepository(Protocol):
 
 
 @runtime_checkable
+class ScoringProfileRepository(Protocol):
+    """Профили скоринга: версии, публикация, откат.
+
+    Инвариант: у вакансии не больше одной «живой» версии (``active`` или
+    ``shadow``). Он держится частичным уникальным индексом в БД, а не только
+    кодом: два параллельных запроса иначе сделали бы решение лотереей.
+    """
+
+    async def add(self, profile: ScoringProfile) -> ScoringProfile:
+        """Сохранить черновик профиля."""
+        ...
+
+    async def get(self, profile_id: UUID) -> ScoringProfile | None: ...
+    async def get_live(self, vacancy_id: UUID) -> ScoringProfile | None:
+        """Профиль, применяемый к новым кандидатам (active или shadow)."""
+        ...
+
+    async def get_latest_version(self, vacancy_id: UUID) -> ScoringProfile | None: ...
+    async def list_versions(self, vacancy_id: UUID, *, limit: int = 50) -> Sequence[ScoringProfile]: ...
+    async def save(self, profile: ScoringProfile) -> ScoringProfile: ...
+    async def publish(self, profile_id: UUID) -> ScoringProfile:
+        """Сделать версию живой, архивировав прежнюю — в одной транзакции."""
+        ...
+
+    async def activate_version(self, vacancy_id: UUID, version: int) -> ScoringProfile:
+        """Откатить вакансию на другую версию (прежняя уходит в архив)."""
+        ...
+
+
+@runtime_checkable
 class OutboxRepository(Protocol):
     async def add(self, entry: OutboxEntry) -> OutboxEntry: ...
     async def claim_batch(self, *, limit: int, now: datetime) -> Sequence[OutboxEntry]:
@@ -235,6 +266,7 @@ class UnitOfWork(Protocol):
 
     vacancies: VacancyRepository
     companies: CompanyRepository
+    profiles: ScoringProfileRepository
     candidates: CandidateRepository
     resumes: ResumeRepository
     conversations: ConversationRepository

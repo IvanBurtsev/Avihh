@@ -36,6 +36,7 @@ from hirebot.infra.db.repositories import (
     SqlOutboxRepository,
     SqlPrivacyRepository,
     SqlResumeRepository,
+    SqlScoringProfileRepository,
     SqlScreeningRepository,
     SqlVacancyRepository,
 )
@@ -52,6 +53,7 @@ from hirebot.ports.repositories import (
     OutboxRepository,
     PrivacyRepository,
     ResumeRepository,
+    ScoringProfileRepository,
     ScreeningRepository,
     VacancyRepository,
 )
@@ -80,6 +82,7 @@ class SqlAlchemyUnitOfWork:
         # но тип был известен заранее (иначе mypy потерял бы типизацию).
         self.vacancies: VacancyRepository
         self.companies: CompanyRepository
+        self.profiles: ScoringProfileRepository
         self.candidates: CandidateRepository
         self.resumes: ResumeRepository
         self.conversations: ConversationRepository
@@ -103,6 +106,7 @@ class SqlAlchemyUnitOfWork:
         self._session = session
         self.vacancies = SqlVacancyRepository(session, self._cipher)
         self.companies = SqlCompanyRepository(session, self._cipher)
+        self.profiles = SqlScoringProfileRepository(session, self._cipher)
         self.candidates = SqlCandidateRepository(session, self._cipher)
         self.resumes = SqlResumeRepository(session, self._cipher)
         self.conversations = SqlConversationRepository(session, self._cipher)

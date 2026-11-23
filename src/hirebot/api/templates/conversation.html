@@ -31,9 +31,25 @@
     <h2>Скрининг</h2>
     {% if view.screening %}
       <div class="score-line">
-        <span class="score-value">{{ "%.1f"|format(view.screening.score) }}</span>
+        <span class="score-value">{{ "%.0f"|format(view.screening.percent if view.screening.percent is not none else view.screening.score) }}%</span>
         <span class="badge verdict-{{ view.screening.verdict }}">{{ view.screening.verdict_label }}</span>
       </div>
+      <p class="muted small">
+        Уверенность: {{ view.screening.confidence_label }}
+        {% if view.screening.profile_version is not none %}· профиль v{{ view.screening.profile_version }}{% endif %}
+      </p>
+      {% if view.screening.needs_more_data %}
+        <div class="banner warn" style="border-radius:6px; margin-bottom:10px">
+          Данных по обязательным критериям мало — решение стоит принимать после
+          уточняющих вопросов или вручную.
+        </div>
+      {% endif %}
+      {% if view.screening.blockers %}
+        <div class="banner error" style="border-radius:6px; margin-bottom:10px">
+          Провал обязательных критериев: {{ view.screening.blockers|join(", ") }}.
+          Автоматическое приглашение невозможно.
+        </div>
+      {% endif %}
       {% if view.screening.summary %}
         <p class="summary">{{ view.screening.summary }}</p>
       {% endif %}

@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -36,7 +36,16 @@ from hirebot.domain.enums import (
     MessageDirection,
     MessageKind,
     OutboxStatus,
+    ProfileStatus,
+    QuestionKind,
     ScreeningVerdict,
+    ThresholdMode,
+)
+from hirebot.domain.scoring import (
+    ProfileCriterion,
+    ProfileQuestion,
+    ProfileThresholds,
+    ScoringProfile,
 )
 from hirebot.infra.db.models import (
     BookingRow,
@@ -46,7 +55,10 @@ from hirebot.infra.db.models import (
     MessageDraftRow,
     MessageRow,
     OutboxRow,
+    ProfileCriterionRow,
+    ProfileQuestionRow,
     ResumeRow,
+    ScoringProfileRow,
     ScreeningRow,
     VacancyRow,
 )
@@ -324,6 +336,83 @@ def apply_message_draft(row: MessageDraftRow, entity: DraftMessage) -> None:
     row.review_comment = entity.review_comment
 
 
+def profile_from_row(
+    row: ScoringProfileRow,
+    criteria: Sequence[ProfileCriterionRow],
+    questions: Sequence[ProfileQuestionRow],
+) -> ScoringProfile:
+    """Собрать доменный профиль из строк профиля, критериев и вопросов.
+
+    Связи передаются явно: репозиторий читает их через ``selectinload``, чтобы
+    не было N+1, и домен не зависит от способа загрузки.
+    """
+    return ScoringProfile(
+        id=row.id,
+        company_id=row.company_id,
+        vacancy_id=row.vacancy_id,
+        version=row.version,
+        status=ProfileStatus(row.status),
+        criteria=[
+            ProfileCriterion(
+                key=item.key,
+                title=item.title,
+                weight=item.weight,
+                must_have=bool(item.must_have),
+                evidence_hint=item.evidence_hint or "",
+                expectation=item.expectation or "",
+                source=item.source or "catalog",
+                position=item.position,
+            )
+            for item in sorted(criteria, key=lambda value: value.position)
+        ],
+        questions=[
+            ProfileQuestion(
+                text=item.text,
+                criterion_key=item.criterion_key,
+                kind=QuestionKind(item.kind),
+                informativeness=item.informativeness,
+                is_custom=bool(item.is_custom),
+                position=item.position,
+            )
+            for item in sorted(questions, key=lambda value: value.position)
+        ],
+        thresholds=ProfileThresholds(
+            invite_at=row.invite_at,
+            human_at=row.human_at,
+            reject_at=row.reject_at,
+            mode=ThresholdMode(row.threshold_mode),
+            top_k=row.top_k,
+            max_questions=row.max_questions,
+            auto_invite=bool(row.auto_invite),
+            min_coverage_for_auto=row.min_coverage_for_auto,
+        ),
+        created_by=row.created_by,
+        created_at=as_utc(row.created_at),
+        published_at=as_utc_optional(row.published_at),
+        comment=row.comment or "",
+    )
+
+
+def apply_profile(row: ScoringProfileRow, entity: ScoringProfile) -> None:
+    """Перенести скалярные поля профиля. Критерии и вопросы пишутся отдельно."""
+    row.company_id = entity.company_id
+    row.vacancy_id = entity.vacancy_id
+    row.version = entity.version
+    row.status = entity.status.value
+    row.invite_at = entity.thresholds.invite_at
+    row.human_at = entity.thresholds.human_at
+    row.reject_at = entity.thresholds.reject_at
+    row.threshold_mode = entity.thresholds.mode.value
+    row.top_k = entity.thresholds.top_k
+    row.max_questions = entity.thresholds.max_questions
+    row.auto_invite = entity.thresholds.auto_invite
+    row.min_coverage_for_auto = entity.thresholds.min_coverage_for_auto
+    row.created_by = entity.created_by
+    row.created_at = entity.created_at
+    row.published_at = entity.published_at
+    row.comment = entity.comment
+
+
 def screening_from_row(row: ScreeningRow) -> ScreeningResult:
     return ScreeningResult(
         id=row.id,
@@ -340,6 +429,11 @@ def screening_from_row(row: ScreeningRow) -> ScreeningResult:
         model=row.model,
         prompt_version=row.prompt_version,
         cache_hit=row.cache_hit,
+        percent=row.percent,
+        coverage=row.coverage,
+        blockers=_str_list(row.blockers),
+        profile_version=row.profile_version,
+        content_hash=row.content_hash,
         created_at=as_utc(row.created_at),
     )
 
@@ -358,6 +452,10 @@ def apply_screening(row: ScreeningRow, entity: ScreeningResult) -> None:
     row.model = entity.model
     row.prompt_version = entity.prompt_version
     row.cache_hit = entity.cache_hit
+    row.percent = entity.percent
+    row.coverage = entity.coverage
+    row.blockers = list(entity.blockers)
+    row.profile_version = entity.profile_version
     row.created_at = entity.created_at
 
 
@@ -437,6 +535,7 @@ __all__ = [
     "apply_message",
     "apply_message_draft",
     "apply_outbox",
+    "apply_profile",
     "apply_resume",
     "apply_screening",
     "apply_vacancy",
@@ -452,6 +551,7 @@ __all__ = [
     "message_draft_from_row",
     "message_from_row",
     "outbox_from_row",
+    "profile_from_row",
     "resume_content_hash",
     "resume_from_row",
     "screening_from_row",

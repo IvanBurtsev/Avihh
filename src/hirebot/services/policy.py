@@ -259,6 +259,24 @@ class PolicyGuard:
                     )
                     raise PolicyViolation(msg)
 
+    def assert_questions_allowed(self, questions: Sequence[str]) -> None:
+        """Запретить вопросы по защищённым признакам.
+
+        Критерий и вопрос — разные пути к одной дискриминации. Вопрос «планируете
+        ли детей?» формально не критерий, но отсекает по полу и семейному
+        положению, поэтому проверяется тем же списком.
+        """
+        for index, text in enumerate(questions):
+            value = str(text or "")
+            group = find_protected_attribute(value)
+            if group is not None:
+                msg = (
+                    f"Вопрос #{index + 1} касается защищённого признака {group!r}: {value!r}. "
+                    "Спрашивать о поле, возрасте, национальности, гражданстве, религии, "
+                    "семейном положении, детях, прописке и здоровье запрещено."
+                )
+                raise PolicyViolation(msg)
+
 
 def _is_quiet_hour(hour: int, settings: PolicySettings) -> bool:
     """Попадает ли час в тихие часы.

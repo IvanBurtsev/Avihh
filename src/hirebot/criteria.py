@@ -67,6 +67,8 @@ class Criterion:
     measurable: str
     weight_hint: int
     must_have_hint: bool
+    #: Что именно требуется — «не менее 3 лет», «уверенное владение».
+    expectation: str = ""
     legal_note: str = ""
 
     @property
@@ -219,6 +221,7 @@ def load_catalog(path: str | Path | None = None) -> Catalog:
             measurable=measurable,
             weight_hint=round(float(weight)),
             must_have_hint=bool(item.get("must_have_hint")),
+            expectation=str(item.get("expectation") or item.get("question") or ""),
             legal_note=str(item.get("legal_note") or "").strip(),
         )
         # Тот же guard, что и у рабочей настройки вакансии: каталог не может

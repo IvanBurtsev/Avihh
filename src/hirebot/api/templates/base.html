@@ -15,6 +15,7 @@
       <a class="brand" href="/ui/queue">AI-рекрутер</a>
       <nav class="nav">
         <a href="/ui/queue" class="{% if active_nav == 'queue' %}active{% endif %}">Очередь</a>
+        <a href="/ui/vacancies" class="{% if active_nav == 'vacancies' %}active{% endif %}">Вакансии</a>
         <a href="/ui/approvals" class="{% if active_nav == 'approvals' %}active{% endif %}">
           На подтверждении{% if pending_total %} <span class="nav-count">{{ pending_total }}</span>{% endif %}
         </a>

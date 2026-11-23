@@ -58,12 +58,14 @@ from hirebot.domain.enums import (
     DraftStatus,
     MessageDirection,
     OutboxStatus,
+    ProfileStatus,
 )
 from hirebot.domain.errors import (
     NotFound,
     ResumeAccessDenied,
     SlotConflict,
 )
+from hirebot.domain.scoring import ScoringProfile
 from hirebot.infra.cache import MemoryCache
 from hirebot.logging_setup import get_logger
 from hirebot.ports.dto import (
@@ -204,6 +206,7 @@ class InMemoryStore:
     """
 
     companies: dict[UUID, Company] = field(default_factory=dict)
+    profiles: dict[UUID, ScoringProfile] = field(default_factory=dict)
     company_slugs: dict[str, UUID] = field(default_factory=dict)
     vacancies: dict[UUID, Vacancy] = field(default_factory=dict)
     vacancy_ids: dict[tuple[Channel, str], UUID] = field(default_factory=dict)
@@ -408,6 +411,66 @@ class InMemoryMessageRepository:
         return (conversation_id, external_id) in self._store.message_external_ids
 
 
+class InMemoryScoringProfileRepository:
+    """Профили скоринга на словарях: версии, публикация, откат."""
+
+    def __init__(self, store: InMemoryStore) -> None:
+        self._store = store
+
+    async def add(self, profile: ScoringProfile) -> ScoringProfile:
+        self._store.profiles[profile.id] = profile
+        return profile
+
+    async def get(self, profile_id: UUID) -> ScoringProfile | None:
+        return self._store.profiles.get(profile_id)
+
+    async def get_live(self, vacancy_id: UUID) -> ScoringProfile | None:
+        for profile in self._store.profiles.values():
+            if profile.vacancy_id == vacancy_id and profile.is_live:
+                return profile
+        return None
+
+    async def get_latest_version(self, vacancy_id: UUID) -> ScoringProfile | None:
+        versions = [profile for profile in self._store.profiles.values() if profile.vacancy_id == vacancy_id]
+        return max(versions, key=lambda item: item.version) if versions else None
+
+    async def list_versions(self, vacancy_id: UUID, *, limit: int = 50) -> Sequence[ScoringProfile]:
+        versions = sorted(
+            (profile for profile in self._store.profiles.values() if profile.vacancy_id == vacancy_id),
+            key=lambda item: item.version,
+            reverse=True,
+        )
+        return versions[:limit]
+
+    async def save(self, profile: ScoringProfile) -> ScoringProfile:
+        self._store.profiles[profile.id] = profile
+        return profile
+
+    async def publish(self, profile_id: UUID) -> ScoringProfile:
+        profile = self._store.profiles.get(profile_id)
+        if profile is None:
+            raise NotFound(f"Профиль {profile_id} не найден")
+        for other in self._store.profiles.values():
+            if other.vacancy_id == profile.vacancy_id and other.is_live and other.id != profile.id:
+                other.status = ProfileStatus.ARCHIVED
+        profile.status = ProfileStatus.ACTIVE
+        profile.published_at = datetime.now(tz=UTC)
+        return profile
+
+    async def activate_version(self, vacancy_id: UUID, version: int) -> ScoringProfile:
+        target = next(
+            (
+                profile
+                for profile in self._store.profiles.values()
+                if profile.vacancy_id == vacancy_id and profile.version == version
+            ),
+            None,
+        )
+        if target is None:
+            raise NotFound(f"Версия {version} профиля вакансии {vacancy_id} не найдена")
+        return await self.publish(target.id)
+
+
 class InMemoryMessageDraftRepository:
     """Репозиторий черновиков на словарях (очередь подтверждения)."""
 
@@ -569,9 +632,9 @@ class InMemoryPrivacyRepository:
 class InMemoryScreeningRepository:
     """Репозиторий скринингов на словарях.
 
-    ``content_hash`` в доменной сущности не хранится (её полей менять нельзя),
-    поэтому хэш выводится из резюме, на которое ссылается результат. Ровно то
-    же обязана делать инфраструктурная реализация.
+    ``content_hash`` приходит из сервиса: только он знает версию профиля, по
+    которой посчитан результат. Если поле не заполнено, хэш выводится из резюме
+    без привязки к профилю — так ведёт себя и инфраструктурная реализация.
     """
 
     def __init__(self, store: InMemoryStore) -> None:
@@ -579,9 +642,12 @@ class InMemoryScreeningRepository:
 
     async def save(self, result: ScreeningResult) -> ScreeningResult:
         self._store.screenings[result.id] = result
-        resume = self._store.resumes.get(result.resume_id)
-        if resume is not None:
-            content_hash = Resume.content_hash(resume.raw_text, vacancy_id=result.vacancy_id)
+        content_hash = result.content_hash
+        if content_hash is None:
+            resume = self._store.resumes.get(result.resume_id)
+            if resume is not None:
+                content_hash = Resume.content_hash(resume.raw_text, vacancy_id=result.vacancy_id)
+        if content_hash:
             ids = self._store.screening_hashes.setdefault(content_hash, [])
             if result.id not in ids:
                 ids.append(result.id)
@@ -776,6 +842,7 @@ class InMemoryUnitOfWork:
         self.store = store
         self.clock = clock
         self.companies = InMemoryCompanyRepository(store)
+        self.profiles = InMemoryScoringProfileRepository(store)
         self.vacancies = InMemoryVacancyRepository(store)
         self.candidates = InMemoryCandidateRepository(store)
         self.resumes = InMemoryResumeRepository(store)

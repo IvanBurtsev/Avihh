@@ -53,8 +53,10 @@ from hirebot.domain.enums import (
     ConversationState,
     DraftStatus,
     OutboxStatus,
+    ProfileStatus,
 )
 from hirebot.domain.errors import NotFound, SlotConflict
+from hirebot.domain.scoring import ScoringProfile
 from hirebot.infra.db import mappers
 from hirebot.infra.db.models import (
     AuditLogRow,
@@ -66,7 +68,10 @@ from hirebot.infra.db.models import (
     MessageDraftRow,
     MessageRow,
     OutboxRow,
+    ProfileCriterionRow,
+    ProfileQuestionRow,
     ResumeRow,
+    ScoringProfileRow,
     ScreeningRow,
     VacancyRow,
     utcnow,
@@ -478,6 +483,165 @@ class SqlMessageRepository(_BaseRepository):
         return bool(await self._session.scalar(stmt))
 
 
+# --- Scoring profiles --------------------------------------------------------
+
+
+class SqlScoringProfileRepository(_BaseRepository):
+    """Профили скоринга с критериями и вопросами.
+
+    Критерии и вопросы пишутся целиком при сохранении: профиль — это настройка,
+    которую правят как единое целое, а не набор независимых записей.
+    """
+
+    async def add(self, profile: ScoringProfile) -> ScoringProfile:
+        row = ScoringProfileRow(id=profile.id)
+        mappers.apply_profile(row, profile)
+        self._session.add(row)
+        await self._session.flush()
+        await self._replace_children(row.id, profile)
+        return await self._reload(row.id)
+
+    async def get(self, profile_id: UUID) -> ScoringProfile | None:
+        row = await self._first(select(ScoringProfileRow).where(ScoringProfileRow.id == profile_id))
+        if row is None:
+            return None
+        return await self._reload(row.id)
+
+    async def get_live(self, vacancy_id: UUID) -> ScoringProfile | None:
+        row = await self._first(
+            select(ScoringProfileRow).where(
+                ScoringProfileRow.vacancy_id == vacancy_id,
+                ScoringProfileRow.status.in_([ProfileStatus.ACTIVE.value, ProfileStatus.SHADOW.value]),
+            )
+        )
+        return await self._reload(row.id) if row is not None else None
+
+    async def get_latest_version(self, vacancy_id: UUID) -> ScoringProfile | None:
+        row = await self._first(
+            select(ScoringProfileRow)
+            .where(ScoringProfileRow.vacancy_id == vacancy_id)
+            .order_by(ScoringProfileRow.version.desc())
+            .limit(1)
+        )
+        return await self._reload(row.id) if row is not None else None
+
+    async def list_versions(self, vacancy_id: UUID, *, limit: int = 50) -> Sequence[ScoringProfile]:
+        limit, _ = _clamp_pagination(limit, 0)
+        rows = await self._all(
+            select(ScoringProfileRow)
+            .where(ScoringProfileRow.vacancy_id == vacancy_id)
+            .order_by(ScoringProfileRow.version.desc())
+            .limit(limit)
+        )
+        return [await self._reload(row.id) for row in rows]
+
+    async def save(self, profile: ScoringProfile) -> ScoringProfile:
+        row = await self._session.get(ScoringProfileRow, profile.id)
+        if row is None:
+            return await self.add(profile)
+        mappers.apply_profile(row, profile)
+        await self._session.flush()
+        await self._replace_children(row.id, profile)
+        return await self._reload(row.id)
+
+    async def publish(self, profile_id: UUID) -> ScoringProfile:
+        """Сделать версию живой, архивировав прежнюю.
+
+        Порядок важен: сначала архив прежней живой версии, потом установка
+        статуса — иначе частичный уникальный индекс отклонит вторую живую.
+        Всё в одной транзакции, поэтому промежуточного состояния не видно.
+        """
+        row = await self._session.get(ScoringProfileRow, profile_id)
+        if row is None:
+            raise NotFound(f"Профиль {profile_id} не найден")
+
+        await self._archive_live(row.vacancy_id)
+        row.status = ProfileStatus.ACTIVE.value
+        row.published_at = utcnow()
+        await self._session.flush()
+        return await self._reload(row.id)
+
+    async def activate_version(self, vacancy_id: UUID, version: int) -> ScoringProfile:
+        """Откат: сделать живой другую версию, архивную не удаляя."""
+        row = await self._first(
+            select(ScoringProfileRow).where(
+                ScoringProfileRow.vacancy_id == vacancy_id,
+                ScoringProfileRow.version == version,
+            )
+        )
+        if row is None:
+            raise NotFound(f"Версия {version} профиля вакансии {vacancy_id} не найдена")
+        return await self.publish(row.id)
+
+    async def _archive_live(self, vacancy_id: UUID) -> None:
+        """Снять статус «живой» со всех версий вакансии."""
+        rows = await self._all(
+            select(ScoringProfileRow).where(
+                ScoringProfileRow.vacancy_id == vacancy_id,
+                ScoringProfileRow.status.in_([ProfileStatus.ACTIVE.value, ProfileStatus.SHADOW.value]),
+            )
+        )
+        for row in rows:
+            row.status = ProfileStatus.ARCHIVED.value
+        if rows:
+            await self._session.flush()
+
+    async def _replace_children(self, profile_id: UUID, profile: ScoringProfile) -> None:
+        """Переписать критерии и вопросы профиля.
+
+        Удаление и вставка, а не дифф: набор маленький, а «изменилось ли» на
+        списках даёт лишние ветки и ошибки при перестановке.
+        """
+        await self._session.execute(
+            sa_delete(ProfileCriterionRow).where(ProfileCriterionRow.profile_id == profile_id)
+        )
+        await self._session.execute(
+            sa_delete(ProfileQuestionRow).where(ProfileQuestionRow.profile_id == profile_id)
+        )
+        for position, criterion in enumerate(profile.criteria):
+            self._session.add(
+                ProfileCriterionRow(
+                    id=uuid4(),
+                    profile_id=profile_id,
+                    key=criterion.key,
+                    title=criterion.title,
+                    weight=criterion.weight,
+                    must_have=criterion.must_have,
+                    evidence_hint=criterion.evidence_hint,
+                    expectation=criterion.expectation,
+                    source=criterion.source,
+                    position=position,
+                )
+            )
+        for position, question in enumerate(profile.questions):
+            self._session.add(
+                ProfileQuestionRow(
+                    id=uuid4(),
+                    profile_id=profile_id,
+                    criterion_key=question.criterion_key,
+                    text=question.text,
+                    kind=question.kind.value,
+                    informativeness=question.informativeness,
+                    is_custom=question.is_custom,
+                    position=position,
+                )
+            )
+        await self._session.flush()
+
+    async def _reload(self, profile_id: UUID) -> ScoringProfile:
+        row = await self._first(
+            select(ScoringProfileRow)
+            .where(ScoringProfileRow.id == profile_id)
+            .options(
+                selectinload(ScoringProfileRow.criteria),
+                selectinload(ScoringProfileRow.questions),
+            )
+        )
+        if row is None:
+            raise NotFound(f"Профиль {profile_id} не найден")
+        return mappers.profile_from_row(row, row.criteria, row.questions)
+
+
 # --- Message drafts (очередь подтверждения) ----------------------------------
 
 
@@ -758,7 +922,10 @@ class SqlScreeningRepository(_BaseRepository):
         # Ключ дедупликации скрининга — хэш «текст резюме + вакансия». В самой
         # доменной сущности его нет, поэтому берём из резюме и считаем здесь:
         # иначе get_by_content_hash не нашёл бы ни одной записи.
-        row.content_hash = await self._content_hash_for(result)
+        # Ключ кэша приходит из сервиса: только он знает версию профиля, по
+        # которой посчитан результат. Пересчёт здесь дал бы другой хэш и кэш
+        # перестал бы находить записи после смены критериев.
+        row.content_hash = result.content_hash or await self._content_hash_for(result)
         await self._session.flush()
         return mappers.screening_from_row(row)
 

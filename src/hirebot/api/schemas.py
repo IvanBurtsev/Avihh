@@ -468,6 +468,102 @@ class ApprovedDraftResponse(BaseModel):
     state: str
 
 
+class CriterionConfigSchema(BaseModel):
+    """Критерий в профиле скоринга."""
+
+    key: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=255)
+    weight: int = Field(default=3, ge=1, le=5)
+    must_have: bool = False
+    evidence_hint: str = ""
+    expectation: str = ""
+    source: str = "catalog"
+
+
+class QuestionConfigSchema(BaseModel):
+    """Вопрос профиля, привязанный к критерию."""
+
+    text: str = Field(min_length=1, max_length=500)
+    criterion_key: str = Field(min_length=1, max_length=64)
+    kind: str = "fact"
+    informativeness: int = Field(default=2, ge=1, le=3)
+    is_custom: bool = False
+
+
+class ThresholdsSchema(BaseModel):
+    """Пороги и режим решения."""
+
+    invite_at: float = Field(default=85.0, ge=0, le=100)
+    human_at: float = Field(default=55.0, ge=0, le=100)
+    reject_at: float = Field(default=40.0, ge=0, le=100)
+    mode: str = "absolute"
+    top_k: int = Field(default=10, ge=1, le=1000)
+    max_questions: int = Field(default=5, ge=1, le=5)
+    auto_invite: bool = False
+    min_coverage_for_auto: float = Field(default=0.7, ge=0, le=1)
+
+
+class ScoringProfileSchema(BaseModel):
+    """Профиль скоринга вакансии."""
+
+    id: UUID
+    vacancy_id: UUID
+    version: int
+    status: str
+    criteria: list[CriterionConfigSchema]
+    questions: list[QuestionConfigSchema]
+    thresholds: ThresholdsSchema
+    created_by: str
+    comment: str = ""
+    published_at: datetime | None = None
+
+
+class ScoringProfileDraftRequest(BaseModel):
+    """Сохранить черновик профиля."""
+
+    criteria: list[CriterionConfigSchema] = Field(min_length=1)
+    questions: list[QuestionConfigSchema] = Field(default_factory=list)
+    thresholds: ThresholdsSchema = Field(default_factory=ThresholdsSchema)
+    created_by: str = Field(default="recruiter", max_length=120)
+    comment: str = Field(default="", max_length=500)
+
+
+class PublishProfileRequest(BaseModel):
+    """Опубликовать профиль. ``as_shadow`` — режим проверки без отправки."""
+
+    as_shadow: bool = True
+
+
+class VacancyCreateRequest(BaseModel):
+    """Создать вакансию в системе."""
+
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(default="", max_length=8000)
+    city: str | None = Field(default=None, max_length=120)
+    company_id: UUID | None = None
+    channel: str = "hh"
+
+
+class QueueItemSchema(BaseModel):
+    """Кандидат в очереди по приоритету."""
+
+    conversation_id: UUID
+    candidate_name: str
+    state: str
+    percent: float
+    coverage: float
+    priority: float
+    blockers: list[str] = Field(default_factory=list)
+    age_hours: float | None = None
+    contributions: dict[str, float] = Field(default_factory=dict)
+    vacancy_title: str = ""
+
+
+class QueueResponse(BaseModel):
+    total: int
+    items: list[QueueItemSchema]
+
+
 __all__ = [
     "ActionResult",
     "ApproveDraftRequest",
@@ -479,6 +575,7 @@ __all__ = [
     "ConversationCard",
     "ConversationListResponse",
     "ConversationSummary",
+    "CriterionConfigSchema",
     "DraftListResponse",
     "DraftSchema",
     "ErrorResponse",
@@ -487,12 +584,20 @@ __all__ = [
     "ManualMessageRequest",
     "MessageSchema",
     "PollResponse",
+    "PublishProfileRequest",
+    "QuestionConfigSchema",
+    "QueueItemSchema",
+    "QueueResponse",
     "ReadyResponse",
     "RejectDraftRequest",
+    "ScoringProfileDraftRequest",
+    "ScoringProfileSchema",
     "ScreeningCriterionSchema",
     "ScreeningSchema",
     "SlotProposalRequest",
     "SlotSchema",
+    "ThresholdsSchema",
+    "VacancyCreateRequest",
     "VacancySchema",
     "VersionResponse",
     "WebhookAccepted",

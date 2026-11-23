@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Критерии: {{ vacancy_title }} — AI-рекрутер{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <a class="back" href="/ui/vacancies">← к вакансиям</a>
+    <h1>Критерии: {{ vacancy_title }}</h1>
+    <p class="muted">
+      Шаг 1 — выберите критерии. Шаг 2 — вопросы кандидату (не больше 5).
+      Шаг 3 — пороги решения. Изменения применяются публикацией.
+    </p>
+  </div>
+  <div class="page-actions">
+    {% if profile %}
+      <span class="badge state-{{ 'booked' if profile.status == 'active' else 'human_review' }}">
+        v{{ profile.version }} · {{ profile.status }}
+      </span>
+    {% else %}
+      <span class="badge verdict-weak">черновик не настроен</span>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post" action="/ui/vacancies/{{ vacancy_id }}/scoring" id="scoring-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+  <section class="card">
+    <h2>1. Критерии <span class="muted small">— выбрано <span id="selected-count">{{ selected_count }}</span></span></h2>
+    <p class="muted small">
+      Галочка — критерий участвует в оценке. Вес: 1 — «приятно иметь», 3 — «важно», 5 — «критично».
+      Обязательный критерий при провале ограничивает процент.
+    </p>
+
+    {% for group in groups %}
+      <h3>{{ group.title }}</h3>
+      <table class="grid compact">
+        <thead>
+          <tr>
+            <th style="width:56px">Выбор</th>
+            <th>Критерий</th>
+            <th style="width:150px">Вес</th>
+            <th style="width:130px">Обязательный</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in group.criteria %}
+            <tr>
+              <td class="numeric">
+                <input type="checkbox" name="selected_{{ item.key }}" value="1"
+                       {% if item.selected %}checked{% endif %} />
+              </td>
+              <td>
+                <strong>{{ item.title }}</strong>
+                {% if item.needs_lawyer %}<span class="tag" title="требует решения юриста">⚖</span>{% endif %}
+                <div class="muted small">{{ item.question }}</div>
+              </td>
+              <td>
+                <select name="weight_{{ item.key }}">
+                  {% for value in [1, 2, 3, 4, 5] %}
+                    <option value="{{ value }}" {% if item.weight == value %}selected{% endif %}>{{ value }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <input type="checkbox" name="must_{{ item.key }}" value="1"
+                       {% if item.must_have %}checked{% endif %} />
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+
+    <details class="stack">
+      <summary class="muted small">Добавить свой критерий</summary>
+      <label>
+        Название
+        <input type="text" name="custom_title" maxlength="255" placeholder="например, опыт с Kafka" />
+      </label>
+      <label>
+        Что искать в резюме или ответе (обязательно, иначе критерий не будет оценён)
+        <input type="text" name="custom_evidence" maxlength="500" placeholder="Kafka, брокеры сообщений" />
+      </label>
+      <label>
+        Вес
+        <select name="custom_weight">
+          {% for value in [1, 2, 3, 4, 5] %}
+            <option value="{{ value }}" {% if value == 3 %}selected{% endif %}>{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="inline-label">
+        <input type="checkbox" name="custom_must" value="1" /> обязательный
+      </label>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>2. Вопросы кандидату <span class="muted small">— не больше 5</span></h2>
+    <p class="muted small">
+      Бот спросит только те вопросы, ответы на которые могут изменить решение,
+      и может остановиться раньше, если решение уже ясно.
+    </p>
+
+    {% for slot in question_slots %}
+      <div class="draft-actions" style="align-items:flex-start; gap:12px; margin-bottom:10px">
+        <div style="flex:0 0 220px">
+          <select name="question_criterion_{{ slot.index }}">
+            <option value="">— критерий —</option>
+            {% for item in selectable_criteria %}
+              <option value="{{ item.key }}" {% if slot.criterion_key == item.key %}selected{% endif %}>
+                {{ item.title }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:1">
+          <input type="text" name="question_text_{{ slot.index }}" maxlength="500"
+                 value="{{ slot.text }}" placeholder="Вопрос кандидату" />
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>3. Пороги решения</h2>
+    <div class="columns">
+      <label>
+        Пригласить от, %
+        <input type="number" name="invite_at" min="0" max="100" step="1"
+               value="{{ thresholds.invite_at|int }}" />
+      </label>
+      <label>
+        Передать человеку от, %
+        <input type="number" name="human_at" min="0" max="100" step="1"
+               value="{{ thresholds.human_at|int }}" />
+      </label>
+      <label>
+        Отказ ниже, %
+        <input type="number" name="reject_at" min="0" max="100" step="1"
+               value="{{ thresholds.reject_at|int }}" />
+      </label>
+      <label>
+        Минимальная уверенность для автоприглашения, %
+        <input type="number" name="min_coverage" min="0" max="100" step="5"
+               value="{{ (thresholds.min_coverage_for_auto * 100)|int }}" />
+      </label>
+    </div>
+    <label class="inline-label" style="margin-top:10px">
+      <input type="checkbox" name="auto_invite" value="1"
+             {% if thresholds.auto_invite %}checked{% endif %} />
+      Приглашать автоматически (иначе решение подтверждает рекрутер)
+    </label>
+    <p class="muted small">
+      Между «передать человеку» и «пригласить» работает рекрутер: бот не отказывает
+      кандидатам в этом коридоре сам.
+    </p>
+  </section>
+
+  <div class="draft-actions" style="margin-bottom:24px">
+    <button type="submit" name="action" value="draft">Сохранить черновик</button>
+    <button type="submit" name="action" value="publish" class="primary">
+      Опубликовать в режиме проверки (shadow)
+    </button>
+  </div>
+  <p class="muted small">
+    В shadow-режиме система считает соответствие и показывает рекомендацию, но
+    кандидатам ничего не отправляется. Переключить в рабочий режим можно после
+    сверки с решениями рекрутера.
+  </p>
+</form>
+{% endblock %}
