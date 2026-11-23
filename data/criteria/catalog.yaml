@@ -44,6 +44,12 @@ categories:
   soft:
     title: Поведенческие характеристики
     description: Плохо проверяются по резюме — только как тема для вопросов.
+  sales:
+    title: Продажи и работа с клиентами
+    description: Навыки продаж, работа с возражениями, воронка, конверсия.
+  management:
+    title: Управление и руководство
+    description: Опыт руководства отделом, найм, планы, аналитика.
   location:
     title: Локация и логистика
     description: Где живёт и готов ли добираться.
@@ -564,6 +570,199 @@ criteria:
     weight_hint: 2
     must_have_hint: false
     expectation: опыт работы в коллективе
+
+  # --- Продажи юридических услуг (банкротство) ---------------------------
+  # Специфика ниши: продажа услуги, которую клиент не планировал покупать,
+  # с длинным циклом принятия решения и возражениями «дорого/подумаю».
+
+  - key: legal_services_sales
+    title: Опыт продаж юридических услуг
+    category: sales
+    kind: experience
+    question: Продавали ли юридические услуги? Какие?
+    evidence_hint: юридические услуги, юрист, правовые услуги, консультации, продажи услуг
+    measurable: high
+    weight_hint: 3
+    must_have_hint: true
+    expectation: опыт продаж юридических услуг от полугода
+
+  - key: bankruptcy_knowledge
+    title: Понимание процедуры банкротства
+    category: sales
+    kind: skill
+    question: Понимаете ли, как проходит банкротство физлица или компании?
+    evidence_hint: банкротство, 127-ФЗ, 115-ФЗ, финансовый управляющий, арбитраж
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: понимание этапов процедуры банкротства
+
+  - key: objection_handling
+    title: Работа с возражениями
+    category: sales
+    kind: skill
+    question: Как отвечаете на «дорого» и «я подумаю»?
+    evidence_hint: возражения, «дорого», «подумаю», дожим, скрипты продаж
+    measurable: medium
+    weight_hint: 3
+    must_have_hint: true
+    expectation: уверенная работа с типовыми возражениями
+
+  - key: cold_calling
+    title: Холодные звонки и обзвон базы
+    category: sales
+    kind: skill
+    question: Работали ли с холодными звонками? Сколько в день?
+    evidence_hint: холодные звонки, обзвон, cold call, лиды, база контактов
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: опыт холодных звонков
+
+  - key: inbound_leads
+    title: Обработка входящих заявок
+    category: sales
+    kind: skill
+    question: Как быстро обрабатывали входящую заявку?
+    evidence_hint: входящие заявки, лиды, обработка заявок, скорость ответа
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: обработка входящих заявок в течение дня
+
+  - key: deal_closing
+    title: Доведение сделки до оплаты
+    category: sales
+    kind: skill
+    question: Какая у вас была конверсия из заявки в оплату?
+    evidence_hint: конверсия, закрытие сделки, оплата, договор, KPI
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: опыт доведения сделки до оплаты
+
+  - key: sales_plan
+    title: Работа с планом продаж
+    category: sales
+    kind: experience
+    question: Работали ли с планом? Какой процент выполняли?
+    evidence_hint: план продаж, KPI, выполнение плана, выручка, чек
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+    expectation: опыт работы с планом продаж
+
+  - key: speech_quality
+    title: Грамотная устная речь
+    category: sales
+    kind: skill
+    question: Как оцениваете свою речь для телефонных переговоров?
+    evidence_hint: переговоры, телефон, грамотная речь, коммуникация
+    measurable: low
+    weight_hint: 2
+    must_have_hint: false
+    expectation: свободная речь для телефонных продаж
+
+  - key: client_documents
+    title: Работа с документами клиента
+    category: sales
+    kind: skill
+    question: Собирали ли документы у клиента для сделки?
+    evidence_hint: документы, договор, сбор документов, проверка документов
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: опыт сбора и проверки документов
+
+  - key: competitor_market
+    title: Знание рынка и конкурентов
+    category: sales
+    kind: skill
+    question: Чем ваша услуга отличалась от конкурентов?
+    evidence_hint: конкуренты, рынок, анализ, сравнение предложений
+    measurable: medium
+    weight_hint: 1
+    must_have_hint: false
+    expectation: понимание конкурентного окружения
+
+  # --- Управление отделом продаж -----------------------------------------
+
+  - key: team_leadership
+    title: Опыт управления отделом
+    category: management
+    kind: experience
+    question: Сколько человек было в подчинении?
+    evidence_hint: руководитель, управление, отдел, команда, подчинённые, супервайзер
+    measurable: high
+    weight_hint: 3
+    must_have_hint: true
+    expectation: опыт руководства отделом от года
+
+  - key: hiring_training
+    title: Найм и обучение менеджеров
+    category: management
+    kind: skill
+    question: Нанимали и обучали ли менеджеров?
+    evidence_hint: найм, собеседования, адаптация, обучение, наставничество
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: опыт найма и обучения сотрудников
+
+  - key: kpi_setup
+    title: Постановка планов и KPI
+    category: management
+    kind: skill
+    question: Как ставили план менеджерам и контролировали его?
+    evidence_hint: KPI, план, показатели, контроль, отчётность, метрики
+    measurable: high
+    weight_hint: 3
+    must_have_hint: false
+    expectation: опыт постановки и контроля KPI
+
+  - key: funnel_management
+    title: Управление воронкой продаж
+    category: management
+    kind: skill
+    question: Как работали с воронкой и узкими местами?
+    evidence_hint: воронка, этапы, конверсия, узкие места, лиды
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: управление воронкой от лида до оплаты
+
+  - key: crm_analytics
+    title: Аналитика в CRM
+    category: management
+    kind: skill
+    question: Какие отчёты строили в CRM?
+    evidence_hint: CRM, аналитика, отчёты, дашборд, выгрузка, метрики
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: построение отчётов по продажам
+
+  - key: sales_scripting
+    title: Разработка скриптов продаж
+    category: management
+    kind: skill
+    question: Писали ли скрипты и регламенты для менеджеров?
+    evidence_hint: скрипты, регламент, стандарты, инструкции, обучение
+    measurable: medium
+    weight_hint: 2
+    must_have_hint: false
+    expectation: разработка скриптов и регламентов
+
+  - key: legal_management
+    title: Управление в юридической сфере
+    category: management
+    kind: experience
+    question: Работали ли руководителем в юридической компании?
+    evidence_hint: юридическая компания, правовое бюро, управление, юристы
+    measurable: high
+    weight_hint: 2
+    must_have_hint: false
+    expectation: опыт руководства в юридической сфере
 
 forbidden:
   - group: Пол и гендер
