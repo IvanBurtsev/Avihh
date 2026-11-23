@@ -81,6 +81,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ARG001", "ARG002", "S101"]
 "src/hirebot/cli.py" = ["T201"]   # CLI prints to stdout on purpose
+"scripts/*.py" = ["T201"]      # утилиты командной строки: print — вывод
 # Имена доменных ошибок намеренно без суффикса Error: они читаются как часть
 # предметного языка (SlotConflict, PolicyViolation), а не как технические исключения.
 "src/hirebot/domain/errors.py" = ["N818"]

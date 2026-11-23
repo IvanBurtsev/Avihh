@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Новая вакансия — AI-рекрутер{% endblock %}
+{% set active_nav = "vacancies" %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <a class="back" href="/ui/vacancies">← к вакансиям</a>
+    <h1>Новая вакансия</h1>
+    <p class="muted">
+      После создания задайте критерии: без них система не сможет оценивать
+      кандидатов и отправит всех человеку.
+    </p>
+  </div>
+</div>
+
+<form method="post" action="/ui/vacancies" class="card stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+
+  <label>
+    Название вакансии
+    <input type="text" name="title" maxlength="255" required
+           placeholder="например, Python-разработчик" value="{{ form.title or '' }}" />
+  </label>
+
+  <label>
+    Город
+    <input type="text" name="city" maxlength="120"
+           placeholder="Москва" value="{{ form.city or '' }}" />
+  </label>
+
+  <label>
+    Описание
+    <textarea name="description" rows="6" maxlength="8000"
+              placeholder="Задачи, стек, условия">{{ form.description or '' }}</textarea>
+    <span class="muted small">
+      Описание уходит в модель при составлении сообщений. Чем оно точнее,
+      тем меньше риск, что бот придумает несуществующие условия.
+    </span>
+  </label>
+
+  <label>
+    Площадка
+    <select name="channel">
+      {% for item in channels %}
+        <option value="{{ item.value }}" {% if form.channel == item.value %}selected{% endif %}>
+          {{ item.label }}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="draft-actions">
+    <button type="submit" class="primary">Создать и настроить критерии</button>
+  </div>
+</form>
+{% endblock %}

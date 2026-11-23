@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import unquote
 from uuid import UUID, uuid4
 
 import httpx
@@ -285,3 +286,46 @@ async def test_saving_without_criteria_shows_message(ui_client: httpx.AsyncClien
 
     assert response.status_code == 303
     assert "flash" in response.headers["location"]
+
+
+async def test_create_vacancy_page(ui_client: httpx.AsyncClient) -> None:
+    response = await ui_client.get("/ui/vacancies/new")
+
+    assert response.status_code == 200
+    assert "Новая вакансия" in response.text
+    assert 'name="title"' in response.text
+
+
+async def test_create_vacancy_redirects_to_criteria(ui_client: httpx.AsyncClient) -> None:
+    await ui_client.get("/ui/vacancies/new")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+
+    response = await ui_client.post(
+        "/ui/vacancies",
+        data={
+            "csrf_token": token,
+            "title": "Тестовая вакансия",
+            "city": "Москва",
+            "description": "Описание",
+            "channel": "hh",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert "/scoring" in location
+
+
+async def test_create_vacancy_requires_title(ui_client: httpx.AsyncClient) -> None:
+    await ui_client.get("/ui/vacancies/new")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+
+    response = await ui_client.post(
+        "/ui/vacancies",
+        data={"csrf_token": token, "title": "   "},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "Название" in unquote(response.headers["location"])

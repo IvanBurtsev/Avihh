@@ -226,6 +226,10 @@ class InMemoryStore:
     drafts: dict[UUID, DraftMessage] = field(default_factory=dict)
     screenings: dict[UUID, ScreeningResult] = field(default_factory=dict)
     screening_hashes: dict[str, list[UUID]] = field(default_factory=dict)
+    # Индексы для поиска: без них каждый запрос перебирает все записи.
+    messages_by_conversation: dict[UUID, list[UUID]] = field(default_factory=dict)
+    screenings_by_candidate: dict[tuple[UUID, UUID], list[UUID]] = field(default_factory=dict)
+    resumes_by_candidate: dict[UUID, list[UUID]] = field(default_factory=dict)
     bookings: dict[UUID, Booking] = field(default_factory=dict)
     booking_keys: dict[str, UUID] = field(default_factory=dict)
     outbox: dict[UUID, OutboxEntry] = field(default_factory=dict)
@@ -326,19 +330,20 @@ class InMemoryResumeRepository:
 
     async def save(self, resume: Resume) -> Resume:
         self._store.resumes[resume.id] = resume
+        bucket = self._store.resumes_by_candidate.setdefault(resume.candidate_id, [])
+        if resume.id not in bucket:
+            bucket.append(resume.id)
         return resume
 
     async def get(self, resume_id: UUID) -> Resume | None:
         return self._store.resumes.get(resume_id)
 
     async def get_latest_for_candidate(self, candidate_id: UUID) -> Resume | None:
-        latest: Resume | None = None
-        for resume in self._store.resumes.values():
-            if resume.candidate_id != candidate_id:
-                continue
-            if latest is None or resume.fetched_at >= latest.fetched_at:
-                latest = resume
-        return latest
+        ids = self._store.resumes_by_candidate.get(candidate_id, [])
+        candidates = [self._store.resumes[item] for item in ids if item in self._store.resumes]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.fetched_at)
 
 
 class InMemoryConversationRepository:
@@ -395,6 +400,7 @@ class InMemoryMessageRepository:
         self._store = store
 
     async def add(self, message: Message) -> Message:
+        self._store.messages_by_conversation.setdefault(message.conversation_id, []).append(message.id)
         if message.external_id:
             key = (message.conversation_id, message.external_id)
             existing_id = self._store.message_external_ids.get(key)
@@ -407,8 +413,9 @@ class InMemoryMessageRepository:
         return message
 
     async def list_for_conversation(self, conversation_id: UUID, *, limit: int = 50) -> Sequence[Message]:
+        ids = self._store.messages_by_conversation.get(conversation_id, [])
         messages = [
-            message for message in self._store.messages.values() if message.conversation_id == conversation_id
+            self._store.messages[message_id] for message_id in ids if message_id in self._store.messages
         ]
         messages.sort(key=lambda message: message.created_at)
         return messages[-limit:]
@@ -692,6 +699,9 @@ class InMemoryScreeningRepository:
 
     async def save(self, result: ScreeningResult) -> ScreeningResult:
         self._store.screenings[result.id] = result
+        bucket = self._store.screenings_by_candidate.setdefault((result.candidate_id, result.vacancy_id), [])
+        if result.id not in bucket:
+            bucket.append(result.id)
         content_hash = result.content_hash
         if content_hash is None:
             resume = self._store.resumes.get(result.resume_id)
@@ -704,13 +714,11 @@ class InMemoryScreeningRepository:
         return result
 
     async def get_latest(self, candidate_id: UUID, vacancy_id: UUID) -> ScreeningResult | None:
-        latest: ScreeningResult | None = None
-        for result in self._store.screenings.values():
-            if result.candidate_id != candidate_id or result.vacancy_id != vacancy_id:
-                continue
-            if latest is None or result.created_at >= latest.created_at:
-                latest = result
-        return latest
+        ids = self._store.screenings_by_candidate.get((candidate_id, vacancy_id), [])
+        candidates = [self._store.screenings[item] for item in ids if item in self._store.screenings]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.created_at)
 
     async def get_by_content_hash(self, content_hash: str) -> ScreeningResult | None:
         ids = self._store.screening_hashes.get(content_hash)

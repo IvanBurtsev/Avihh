@@ -383,6 +383,96 @@ def _scoring_service(container: Container) -> Any:
     return ScoringProfileService(container)
 
 
+@router.get("/vacancies/new", response_class=HTMLResponse)
+async def vacancy_new_page(
+    request: Request,
+    settings: SettingsDep,
+) -> Response:
+    """Форма создания вакансии."""
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+    return _render(
+        request,
+        "vacancy_new.html",
+        {
+            "form": {},
+            "channels": [
+                {"value": Channel.HH.value, "label": "hh.ru"},
+                {"value": Channel.AVITO.value, "label": "Avito"},
+            ],
+            "active_nav": "vacancies",
+        },
+        settings=settings,
+    )
+
+
+@router.post("/vacancies")
+async def vacancy_create(
+    request: Request,
+    settings: SettingsDep,
+    container: ContainerDep,
+    csrf: Annotated[str | None, Form(alias="csrf_token")] = None,
+    title: Annotated[str, Form()] = "",
+    city: Annotated[str | None, Form()] = None,
+    description: Annotated[str, Form()] = "",
+    channel: Annotated[str, Form()] = "hh",
+) -> Response:
+    """Создать вакансию и сразу перейти к настройке критериев."""
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+    verify_csrf(request, csrf)
+
+    clean_title = (title or "").strip()
+    if not clean_title:
+        return RedirectResponse(
+            url=_flash_url("/ui/vacancies/new", "Название вакансии обязательно", kind="warn"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    from uuid import uuid4
+
+    from hirebot.domain.entities import Company, Vacancy, new_id
+    from hirebot.services.base import DEFAULT_COMPANY_ID
+
+    try:
+        channel_value = Channel(channel)
+    except ValueError:
+        channel_value = Channel.HH
+
+    async with container.uow_factory() as uow:
+        await uow.companies.upsert(
+            Company(
+                id=DEFAULT_COMPANY_ID,
+                name="Компания",
+                slug=f"company-{DEFAULT_COMPANY_ID.hex[:8]}",
+            )
+        )
+        vacancy = await uow.vacancies.upsert(
+            Vacancy(
+                id=new_id(),
+                channel=channel_value,
+                external_id=f"manual-{uuid4().hex[:12]}",
+                title=clean_title,
+                company_id=DEFAULT_COMPANY_ID,
+                description=(description or "").strip(),
+                city=(city or "").strip() or None,
+            )
+        )
+        await uow.commit()
+
+    logger.info("ui_vacancy_created", vacancy_id=str(vacancy.id), channel=channel_value.value)
+    return RedirectResponse(
+        url=_flash_url(
+            f"/ui/vacancies/{vacancy.id}/scoring",
+            "Вакансия создана. Задайте критерии скоринга.",
+            kind="ok",
+        ),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/vacancies", response_class=HTMLResponse)
 async def vacancies_page(
     request: Request,
