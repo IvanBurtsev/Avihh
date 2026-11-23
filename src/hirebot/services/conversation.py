@@ -1045,8 +1045,11 @@ class ConversationService(ServiceBase):
         # настройку: считаем, что скрининга нет, и оценим заново. Иначе кандидат
         # получил бы решение по старым критериям.
         if screening is not None:
-            current_version = live_profile.version if live_profile is not None else None
-            if screening.profile_version != current_version:
+            # Профиля нет — это версия 0 (набор критериев из самой вакансии).
+            # Сравнивать None с 0 нельзя: иначе каждый шаг считал бы результат
+            # устаревшим и пересчитывал его заново.
+            current_version = live_profile.version if live_profile is not None else 0
+            if (screening.profile_version or 0) != current_version:
                 logger.info(
                     "screening_invalidated_by_profile_change",
                     conversation_id=str(conversation_id),
