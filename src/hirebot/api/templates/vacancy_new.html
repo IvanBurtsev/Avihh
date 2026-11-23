@@ -40,6 +40,18 @@
   </label>
 
   <label>
+    ID вакансии на площадке <span class="muted small">(необязательно)</span>
+    <input type="text" name="external_id" maxlength="120"
+           placeholder="например, 12345678 — номер вакансии в hh"
+           value="{{ form.external_id or '' }}" />
+    <span class="muted small">
+      Если указать — отклики с площадки привяжутся к этой вакансии и её критериям.
+      Без него вакансия создаётся только для демонстрации: реальные отклики
+      придут на отдельную запись без критериев.
+    </span>
+  </label>
+
+  <label>
     Площадка
     <select name="channel">
       {% for item in channels %}

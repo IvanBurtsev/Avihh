@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 from uuid import UUID, uuid4
 
 import httpx
@@ -329,3 +329,37 @@ async def test_create_vacancy_requires_title(ui_client: httpx.AsyncClient) -> No
 
     assert response.status_code == 303
     assert "Название" in unquote(response.headers["location"])
+
+
+async def test_create_vacancy_with_platform_id_links(ui_client: httpx.AsyncClient) -> None:
+    """ID площадки связывает вакансию с реальными откликами."""
+    await ui_client.get("/ui/vacancies/new")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+
+    response = await ui_client.post(
+        "/ui/vacancies",
+        data={
+            "csrf_token": token,
+            "title": "Связанная вакансия",
+            "channel": "hh",
+            "external_id": "12345678",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "/scoring" in response.headers["location"]
+
+
+async def test_create_vacancy_with_duplicate_platform_id(ui_client: httpx.AsyncClient) -> None:
+    """Повторный ID не создаёт вторую вакансию: отклики не должны раздваиваться."""
+    await ui_client.get("/ui/vacancies/new")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+    data = {"csrf_token": token, "title": "Дубль", "channel": "hh", "external_id": "dup-777"}
+
+    first = await ui_client.post("/ui/vacancies", data=data, follow_redirects=False)
+    second = await ui_client.post("/ui/vacancies", data=data, follow_redirects=False)
+
+    assert first.status_code == 303
+    assert second.status_code == 303
+    assert "уже есть" in unquote_plus(second.headers["location"])

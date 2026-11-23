@@ -417,6 +417,7 @@ async def vacancy_create(
     city: Annotated[str | None, Form()] = None,
     description: Annotated[str, Form()] = "",
     channel: Annotated[str, Form()] = "hh",
+    external_id: Annotated[str | None, Form()] = None,
 ) -> Response:
     """Создать вакансию и сразу перейти к настройке критериев."""
     redirect = _guard(request, settings)
@@ -441,6 +442,11 @@ async def vacancy_create(
     except ValueError:
         channel_value = Channel.HH
 
+    # Идентификатор площадки связывает вакансию с реальными откликами.
+    # Без него вакансия живёт только внутри системы и отклики не подхватит.
+    clean_external = (external_id or "").strip()
+    resolved_external = clean_external or f"manual-{uuid4().hex[:12]}"
+
     async with container.uow_factory() as uow:
         await uow.companies.upsert(
             Company(
@@ -449,11 +455,26 @@ async def vacancy_create(
                 slug=f"company-{DEFAULT_COMPANY_ID.hex[:8]}",
             )
         )
+        existing = await uow.vacancies.get_by_external(channel_value, resolved_external)
+        if existing is not None:
+            logger.info(
+                "ui_vacancy_already_exists",
+                vacancy_id=str(existing.id),
+                external_id=resolved_external,
+            )
+            return RedirectResponse(
+                url=_flash_url(
+                    f"/ui/vacancies/{existing.id}/scoring",
+                    "Вакансия с таким ID уже есть — настройте критерии у неё",
+                    kind="info",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         vacancy = await uow.vacancies.upsert(
             Vacancy(
                 id=new_id(),
                 channel=channel_value,
-                external_id=f"manual-{uuid4().hex[:12]}",
+                external_id=resolved_external,
                 title=clean_title,
                 company_id=DEFAULT_COMPANY_ID,
                 description=(description or "").strip(),
