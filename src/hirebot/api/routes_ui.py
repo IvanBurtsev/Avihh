@@ -491,7 +491,18 @@ async def vacancies_page(
     for vacancy in vacancies:
         live = await service.get_live(vacancy.id)
         draft = await service.get_draft(vacancy.id)
+        # Показываем то, по чему реально считаются кандидаты: активную версию.
+        # Черновик — отдельный признак «есть неприменённые правки».
         profile = live or draft
+        # «Обновлена» — это последнее изменение настроек, а не карточки вакансии:
+        # иначе после сохранения критериев дата не меняется и кажется, что
+        # ничего не сохранилось.
+        moments = [vacancy.updated_at]
+        if profile is not None:
+            moments.append(profile.published_at or profile.created_at)
+        if draft is not None:
+            moments.append(draft.created_at)
+        latest = max(item for item in moments if item is not None)
         rows.append(
             {
                 "id": vacancy.id,
@@ -501,7 +512,8 @@ async def vacancies_page(
                 "criteria_count": len(profile.criteria) if profile else len(vacancy.criteria),
                 "profile_version": profile.version if profile else None,
                 "profile_status": profile.status.value if profile else None,
-                "updated_at": format_moment(vacancy.updated_at, timezone=_timezone(settings)),
+                "has_draft": draft is not None and (live is None or draft.version != live.version),
+                "updated_at": format_moment(latest, timezone=_timezone(settings)),
             }
         )
     return _render(

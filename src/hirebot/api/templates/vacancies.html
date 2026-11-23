@@ -39,6 +39,9 @@
               <span class="badge state-{{ 'booked' if item.profile_status == 'active' else 'human_review' }}">
                 v{{ item.profile_version }} · {{ item.profile_status }}
               </span>
+              {% if item.has_draft %}
+                <div class="muted small">есть неприменённые правки</div>
+              {% endif %}
             {% else %}
               <span class="badge verdict-weak">не настроен</span>
             {% endif %}

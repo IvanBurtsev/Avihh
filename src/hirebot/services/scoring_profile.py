@@ -181,6 +181,13 @@ class ScoringProfileService(ServiceBase):
             if as_shadow:
                 saved.status = ProfileStatus.SHADOW
                 saved = await uow.profiles.save(saved)
+            # Прочие черновики вакансии больше не актуальны: они были правками
+            # к этой версии. Иначе в интерфейсе висит «draft», который уже
+            # применён, и кажется, что сохранение не сработало.
+            for other in await uow.profiles.list_versions(saved.vacancy_id, limit=50):
+                if other.id != saved.id and other.is_draft:
+                    other.status = ProfileStatus.ARCHIVED
+                    await uow.profiles.save(other)
             await uow.commit()
 
         await self.container.cache.delete(profile_cache_key(saved.vacancy_id))
