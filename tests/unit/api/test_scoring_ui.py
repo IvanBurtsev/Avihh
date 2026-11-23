@@ -431,3 +431,38 @@ async def test_delete_vacancy_with_conversations_hides_it(ui_client: httpx.Async
 
     assert response.status_code == 303
     assert "скрыта" in unquote_plus(response.headers["location"])
+
+
+def test_must_have_without_selection_is_included(catalog: Any) -> None:
+    """«Обязательный» без «выбора» не игнорируется: критерий участвует в оценке."""
+    parsed = parse_scoring_form(
+        {
+            "must_python": "1",
+            "weight_python": "5",
+            # selected_python намеренно отсутствует
+        },
+        catalog,
+    )
+
+    assert parsed.is_valid
+    keys = {item.key for item in parsed.criteria}
+    assert keys == {"python"}
+    python = next(item for item in parsed.criteria if item.key == "python")
+    assert python.must_have is True
+
+
+def test_must_have_only_still_requires_one_criterion(catalog: Any) -> None:
+    """Если вообще ничего не отмечено — ошибка остаётся."""
+    parsed = parse_scoring_form({}, catalog)
+
+    assert not parsed.is_valid
+    assert any("хотя бы один критерий" in error for error in parsed.errors)
+
+
+def test_unselected_and_unchecked_criterion_is_ignored(catalog: Any) -> None:
+    """Ни «выбор», ни «обязательный» — критерия нет в профиле."""
+    parsed = parse_scoring_form({"selected_python": "1"}, catalog)
+
+    keys = {item.key for item in parsed.criteria}
+    assert keys == {"python"}
+    assert "sql" not in keys

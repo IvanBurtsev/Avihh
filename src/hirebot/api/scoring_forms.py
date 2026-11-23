@@ -72,7 +72,12 @@ def parse_scoring_form(form: Mapping[str, Any], catalog: Catalog) -> ScoringForm
 
     position = 0
     for key, known in by_key.items():
-        if form.get(f"selected_{key}") is None:
+        selected = form.get(f"selected_{key}") is not None
+        must_have = form.get(f"must_{key}") is not None
+        # Отметка «обязательный» без «выбор» раньше молча игнорировалась:
+        # рекрутер считал критерий обязательным, а его не было в профиле.
+        # Обязательный критерий по определению участвует в оценке.
+        if not selected and not must_have:
             continue
         weight = _int_or(form.get(f"weight_{key}"), known.weight_hint, low=1, high=5)
         result.criteria.append(
@@ -80,7 +85,7 @@ def parse_scoring_form(form: Mapping[str, Any], catalog: Catalog) -> ScoringForm
                 key=key,
                 title=known.title,
                 weight=weight,
-                must_have=form.get(f"must_{key}") is not None,
+                must_have=must_have,
                 evidence_hint=known.evidence_hint,
                 expectation=known.expectation or known.title,
                 source="catalog",
