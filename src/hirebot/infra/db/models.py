@@ -450,6 +450,32 @@ class ScreeningRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
 
+class QuestionAnswerRow(Base):
+    """Ответ кандидата на уточняющий вопрос, привязанный к критерию.
+
+    Нужен для пересчёта соответствия: ответ — новые данные, и они должны
+    менять решение, а не только оставаться в переписке.
+    """
+
+    __tablename__ = "question_answers"
+    __table_args__ = (
+        Index("ix_question_answers_conversation", "conversation_id", "created_at"),
+        UniqueConstraint("conversation_id", "criterion_key", "question", name="uq_question_answers_unique"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    criterion_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    is_unclear: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    contradicts_resume: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
 class PaidActionRow(Base):
     """Журнал платных действий: сколько и за что списано.
 

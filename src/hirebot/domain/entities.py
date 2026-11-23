@@ -255,6 +255,34 @@ class ScreeningResult:
 
 
 @dataclass(slots=True, frozen=True)
+class QuestionAnswer:
+    """Ответ кандидата на уточняющий вопрос, привязанный к критерию.
+
+    Зачем хранить отдельно от сообщений: ответ — это **новые данные для
+    скоринга**, а не просто строка переписки. Без привязки к критерию нельзя
+    пересчитать соответствие и объяснить, что изменилось.
+    """
+
+    id: UUID
+    conversation_id: UUID
+    criterion_key: str
+    question: str
+    answer: str
+    score: float
+    is_unclear: bool = False
+    contradicts_resume: bool = False
+    created_at: datetime = field(default_factory=_utcnow)
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.score <= 100.0:
+            msg = f"Оценка ответа вне диапазона 0..100: {self.score}"
+            raise ValueError(msg)
+        if not self.criterion_key.strip():
+            msg = "Ответ должен быть привязан к критерию"
+            raise ValueError(msg)
+
+
+@dataclass(slots=True, frozen=True)
 class InterviewSlot:
     """Свободный слот для собеседования (в UTC)."""
 

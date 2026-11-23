@@ -45,6 +45,7 @@ from hirebot.domain.entities import (
     InterviewSlot,
     Message,
     OutboxEntry,
+    QuestionAnswer,
     Resume,
     ScreeningCriterion,
     ScreeningResult,
@@ -80,6 +81,8 @@ from hirebot.ports.dto import (
 )
 from hirebot.ports.infra import HttpResponse
 from hirebot.ports.llm import (
+    AnswerAssessment,
+    AnswerAssessmentRequest,
     MessageDraft,
     MessageRequest,
     ReplyAnalysisRequest,
@@ -209,6 +212,7 @@ class InMemoryStore:
     companies: dict[UUID, Company] = field(default_factory=dict)
     profiles: dict[UUID, ScoringProfile] = field(default_factory=dict)
     paid_actions: dict[UUID, PaidAction] = field(default_factory=dict)
+    answers: dict[UUID, QuestionAnswer] = field(default_factory=dict)
     company_slugs: dict[str, UUID] = field(default_factory=dict)
     vacancies: dict[UUID, Vacancy] = field(default_factory=dict)
     vacancy_ids: dict[tuple[Channel, str], UUID] = field(default_factory=dict)
@@ -411,6 +415,30 @@ class InMemoryMessageRepository:
 
     async def exists_external_id(self, conversation_id: UUID, external_id: str) -> bool:
         return (conversation_id, external_id) in self._store.message_external_ids
+
+
+class InMemoryQuestionAnswerRepository:
+    """Ответы кандидатов на словаре."""
+
+    def __init__(self, store: InMemoryStore) -> None:
+        self._store = store
+
+    async def add(self, answer: QuestionAnswer) -> QuestionAnswer:
+        self._store.answers[answer.id] = answer
+        return answer
+
+    async def list_for_conversation(self, conversation_id: UUID) -> Sequence[QuestionAnswer]:
+        items = [item for item in self._store.answers.values() if item.conversation_id == conversation_id]
+        items.sort(key=lambda item: item.created_at)
+        return items
+
+    async def latest_for_criterion(self, conversation_id: UUID, criterion_key: str) -> QuestionAnswer | None:
+        items = [
+            item
+            for item in self._store.answers.values()
+            if item.conversation_id == conversation_id and item.criterion_key == criterion_key
+        ]
+        return max(items, key=lambda item: item.created_at) if items else None
 
 
 class InMemoryPaidActionRepository:
@@ -866,6 +894,7 @@ class InMemoryUnitOfWork:
         self.companies = InMemoryCompanyRepository(store)
         self.profiles = InMemoryScoringProfileRepository(store)
         self.paid_actions = InMemoryPaidActionRepository(store)
+        self.answers = InMemoryQuestionAnswerRepository(store)
         self.vacancies = InMemoryVacancyRepository(store)
         self.candidates = InMemoryCandidateRepository(store)
         self.resumes = InMemoryResumeRepository(store)
@@ -1490,8 +1519,44 @@ class FakeLlmAdapter:
         self.screen_calls: list[ScreeningRequest] = []
         self.compose_calls: list[MessageRequest] = []
         self.reply_calls: list[ReplyAnalysisRequest] = []
+        self.answer_calls: list[AnswerAssessmentRequest] = []
 
     # ---- LlmPort ---- #
+
+    async def assess_answer(self, request: AnswerAssessmentRequest) -> AnswerAssessment:
+        """Оценить ответ кандидата по критерию — детерминированно.
+
+        Та же логика, что в ``adapters.llm.fake``: уклончивость, совпадение
+        ключевых слов, объём. Дубль существует исторически; при слиянии
+        реализаций останется одна.
+        """
+        self.answer_calls.append(request)
+        text = (request.answer or "").strip()
+        lowered = text.casefold()
+        unclear_markers = (
+            "не знаю",
+            "не помню",
+            "не уверен",
+            "затрудняюсь",
+            "без комментариев",
+            "не хочу",
+            "пропустить",
+            "skip",
+            "idk",
+        )
+        if len(text) < 3 or any(marker in lowered for marker in unclear_markers):
+            return AnswerAssessment(score=0.0, evidence="", is_unclear=True)
+
+        expected = set(_tokens(request.expectation)) | set(_tokens(request.evidence_hint))
+        expected = {token for token in expected if len(token) >= 4}
+        if not expected:
+            return AnswerAssessment(score=50.0, evidence=text[:200])
+        actual = set(_tokens(text))
+        share = len(expected & actual) / len(expected)
+        return AnswerAssessment(
+            score=round(min(100.0, 30.0 + share * 70.0), 1),
+            evidence=text[:200],
+        )
 
     async def screen_resume(self, request: ScreeningRequest) -> ScreeningDraft:
         self.screen_calls.append(request)

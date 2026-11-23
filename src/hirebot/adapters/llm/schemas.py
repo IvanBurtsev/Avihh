@@ -168,3 +168,12 @@ class ReplyAnalysisResponseSchema(BaseModel):
     @classmethod
     def _normalize_summary(cls, value: object) -> str:
         return value.strip() if isinstance(value, str) else ""
+
+
+class AnswerAssessmentResponseSchema(BaseModel):
+    """Ответ модели на оценку ответа кандидата по критерию."""
+
+    score: float = Field(ge=0, le=100)
+    evidence: str = Field(default="", max_length=400)
+    is_unclear: bool = False
+    contradicts_resume: bool = False

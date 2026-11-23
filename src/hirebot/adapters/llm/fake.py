@@ -36,6 +36,8 @@ from hirebot.domain.entities import CandidateReply, ScreeningCriterion
 from hirebot.domain.enums import CandidateIntent, MessageKind
 from hirebot.logging_setup import get_logger
 from hirebot.ports.llm import (
+    AnswerAssessment,
+    AnswerAssessmentRequest,
     LlmPort,
     MessageDraft,
     MessageRequest,
@@ -284,6 +286,7 @@ class FakeLlmAdapter(LlmPort):
         self.screen_calls: list[ScreeningRequest] = []
         self.compose_calls: list[MessageRequest] = []
         self.reply_calls: list[ReplyAnalysisRequest] = []
+        self.answer_calls: list[AnswerAssessmentRequest] = []
 
     async def screen_resume(self, request: ScreeningRequest) -> ScreeningDraft:
         """Оценить резюме по критериям вакансии детерминированным алгоритмом."""
@@ -330,6 +333,49 @@ class FakeLlmAdapter(LlmPort):
             model=_MODEL_NAME,
             prompt_version=self._prompt_version,
             cached=False,
+        )
+
+    async def assess_answer(self, request: AnswerAssessmentRequest) -> AnswerAssessment:
+        """Оценить ответ по критерию без сети.
+
+        Правила намеренно простые и объяснимые: заглушка не должна изображать
+        понимание, которого у неё нет. Она проверяет три вещи — уклончивость,
+        наличие ключевых слов критерия и объём ответа.
+        """
+        self.answer_calls.append(request)
+        text = (request.answer or "").strip()
+        lowered = text.casefold()
+
+        unclear_markers = (
+            "не знаю",
+            "не помню",
+            "не уверен",
+            "затрудняюсь",
+            "без комментариев",
+            "не хочу",
+            "пропустить",
+            "skip",
+            "idk",
+            "-",
+            "—",
+        )
+        if len(text) < 3 or any(marker in lowered for marker in unclear_markers):
+            return AnswerAssessment(score=0.0, evidence="", is_unclear=True)
+
+        expected = _answer_tokens(request.expectation, request.evidence_hint)
+        actual = _answer_tokens(text)
+        matched = expected & actual
+        if not expected:
+            # Нечего сравнивать: ответ содержательный, но оценивать не по чему.
+            return AnswerAssessment(score=50.0, evidence=text[:200], is_unclear=False)
+
+        share = len(matched) / len(expected)
+        score = round(min(100.0, 30.0 + share * 70.0), 1)
+        return AnswerAssessment(
+            score=score,
+            evidence=text[:200],
+            is_unclear=False,
+            contradicts_resume=False,
         )
 
     async def analyze_reply(self, request: ReplyAnalysisRequest) -> CandidateReply:
@@ -846,6 +892,43 @@ def _detect_intent(lowered: str, chosen: int | None) -> CandidateIntent:
     if extract_contacts(lowered) or any(ch.isdigit() for ch in lowered):
         return CandidateIntent.PROVIDED_INFO
     return CandidateIntent.UNCLEAR
+
+
+def _answer_tokens(*texts: str) -> set[str]:
+    """Значимые слова для сравнения ответа с ожиданием критерия."""
+    stop = {
+        "и",
+        "в",
+        "на",
+        "с",
+        "по",
+        "для",
+        "не",
+        "что",
+        "как",
+        "это",
+        "или",
+        "есть",
+        "был",
+        "была",
+        "было",
+        "очень",
+        "тоже",
+        "также",
+        "мне",
+        "мы",
+        "the",
+        "and",
+        "with",
+        "for",
+        "from",
+    }
+    tokens: set[str] = set()
+    for text in texts:
+        for word in re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9+#.]+", (text or "").casefold()):
+            if len(word) >= 4 and word not in stop:
+                tokens.add(word)
+    return tokens
 
 
 def _detect_slot_choice(lowered: str, slots_count: int) -> int | None:

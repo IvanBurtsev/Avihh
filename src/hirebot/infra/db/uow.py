@@ -36,6 +36,7 @@ from hirebot.infra.db.repositories import (
     SqlOutboxRepository,
     SqlPaidActionRepository,
     SqlPrivacyRepository,
+    SqlQuestionAnswerRepository,
     SqlResumeRepository,
     SqlScoringProfileRepository,
     SqlScreeningRepository,
@@ -54,6 +55,7 @@ from hirebot.ports.repositories import (
     OutboxRepository,
     PaidActionRepository,
     PrivacyRepository,
+    QuestionAnswerRepository,
     ResumeRepository,
     ScoringProfileRepository,
     ScreeningRepository,
@@ -86,6 +88,7 @@ class SqlAlchemyUnitOfWork:
         self.companies: CompanyRepository
         self.profiles: ScoringProfileRepository
         self.paid_actions: PaidActionRepository
+        self.answers: QuestionAnswerRepository
         self.candidates: CandidateRepository
         self.resumes: ResumeRepository
         self.conversations: ConversationRepository
@@ -111,6 +114,7 @@ class SqlAlchemyUnitOfWork:
         self.companies = SqlCompanyRepository(session, self._cipher)
         self.profiles = SqlScoringProfileRepository(session, self._cipher)
         self.paid_actions = SqlPaidActionRepository(session, self._cipher)
+        self.answers = SqlQuestionAnswerRepository(session, self._cipher)
         self.candidates = SqlCandidateRepository(session, self._cipher)
         self.resumes = SqlResumeRepository(session, self._cipher)
         self.conversations = SqlConversationRepository(session, self._cipher)

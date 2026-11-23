@@ -23,6 +23,7 @@ from hirebot.domain.entities import (
     DraftMessage,
     Message,
     OutboxEntry,
+    QuestionAnswer,
     Resume,
     ScreeningCriterion,
     ScreeningResult,
@@ -57,6 +58,7 @@ from hirebot.infra.db.models import (
     OutboxRow,
     ProfileCriterionRow,
     ProfileQuestionRow,
+    QuestionAnswerRow,
     ResumeRow,
     ScoringProfileRow,
     ScreeningRow,
@@ -334,6 +336,21 @@ def apply_message_draft(row: MessageDraftRow, entity: DraftMessage) -> None:
     row.reviewed_at = entity.reviewed_at
     row.reviewer = entity.reviewer
     row.review_comment = entity.review_comment
+
+
+def question_answer_from_row(row: QuestionAnswerRow) -> QuestionAnswer:
+    """Собрать доменный ответ кандидата из строки."""
+    return QuestionAnswer(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        criterion_key=row.criterion_key,
+        question=row.question,
+        answer=row.answer,
+        score=row.score,
+        is_unclear=bool(row.is_unclear),
+        contradicts_resume=bool(row.contradicts_resume),
+        created_at=as_utc(row.created_at),
+    )
 
 
 def profile_from_row(

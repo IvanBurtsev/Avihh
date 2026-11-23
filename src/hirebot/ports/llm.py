@@ -78,6 +78,44 @@ class ReplyAnalysisRequest:
     proposed_slots: Sequence[str] = field(default_factory=tuple)
 
 
+@dataclass(slots=True, frozen=True)
+class AnswerAssessmentRequest:
+    """Запрос на оценку ответа кандидата по конкретному критерию.
+
+    ``expectation`` и ``evidence_hint`` обязательны: без них модель не знает,
+    какой уровень считать закрытым и что считать доказательством.
+    """
+
+    criterion_key: str
+    criterion_title: str
+    expectation: str
+    evidence_hint: str
+    question: str
+    answer: str
+    #: Текст резюме для проверки противоречий (может быть пустым).
+    resume_text: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class AnswerAssessment:
+    """Оценка ответа по критерию.
+
+    ``is_unclear`` — ответ не содержит информации (уклончивый, «не знаю»).
+    ``contradicts_resume`` — ответ противоречит резюме: такой случай уходит
+    человеку, а не повышает балл автоматически.
+    """
+
+    score: float
+    evidence: str = ""
+    is_unclear: bool = False
+    contradicts_resume: bool = False
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.score <= 100.0:
+            msg = f"Оценка ответа вне диапазона 0..100: {self.score}"
+            raise ValueError(msg)
+
+
 @runtime_checkable
 class LlmPort(Protocol):
     """Провайдер модели.
@@ -96,4 +134,13 @@ class LlmPort(Protocol):
 
     async def analyze_reply(self, request: ReplyAnalysisRequest) -> CandidateReply:
         """Понять, что ответил кандидат, и выбрать следующий шаг."""
+        ...
+
+    async def assess_answer(self, request: AnswerAssessmentRequest) -> AnswerAssessment:
+        """Оценить ответ кандидата по критерию профиля.
+
+        Нужно для пересчёта соответствия после уточняющих вопросов: ответ —
+        это новые данные, и они должны влиять на решение, а не только на
+        переписку.
+        """
         ...

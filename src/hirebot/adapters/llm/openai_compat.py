@@ -31,10 +31,12 @@ from pydantic import BaseModel, ValidationError
 
 from hirebot.adapters.http_utils import error_code, error_summary, json_object, retry_after_s
 from hirebot.adapters.llm.prompts import (
+    ANSWER_SYSTEM_PROMPT,
     MESSAGE_SYSTEM_PROMPT,
     PROMPT_VERSION,
     REPLY_SYSTEM_PROMPT,
     SCREENING_SYSTEM_PROMPT,
+    answer_user_prompt,
     message_user_prompt,
     reply_user_prompt,
     screening_user_prompt,
@@ -45,6 +47,7 @@ from hirebot.adapters.llm.redaction import (
     redact_text,
 )
 from hirebot.adapters.llm.schemas import (
+    AnswerAssessmentResponseSchema,
     MessageResponseSchema,
     ReplyAnalysisResponseSchema,
     ScreeningResponseSchema,
@@ -64,6 +67,8 @@ from hirebot.logging_setup import get_logger
 from hirebot.observability.metrics import record_llm_call
 from hirebot.ports.infra import CachePort, HttpClientPort, HttpResponse
 from hirebot.ports.llm import (
+    AnswerAssessment,
+    AnswerAssessmentRequest,
     LlmPort,
     MessageDraft,
     MessageRequest,
@@ -185,6 +190,43 @@ class OpenAiCompatAdapter(LlmPort):
         return criteria
 
     # ------------------------------------------------------------ сообщения
+
+    async def assess_answer(self, request: AnswerAssessmentRequest) -> AnswerAssessment:
+        """Оценить ответ кандидата по критерию профиля."""
+        answer = request.answer
+        resume_text = request.resume_text
+        if not self._settings.send_pii:
+            answer = redact_text(answer)
+            resume_text = redact_text(resume_text)
+        safe_request = AnswerAssessmentRequest(
+            criterion_key=request.criterion_key,
+            criterion_title=request.criterion_title,
+            expectation=request.expectation,
+            evidence_hint=request.evidence_hint,
+            question=request.question,
+            answer=answer,
+            resume_text=resume_text,
+        )
+        user_prompt = answer_user_prompt(safe_request)
+        cache_key = self._cache_key(
+            "answer",
+            _hash_json(
+                {
+                    "answer": answer,
+                    "criterion": request.criterion_key,
+                    "question": request.question,
+                    "pii": self._settings.send_pii,
+                }
+            ),
+        )
+        payload, _ = await self._chat(system=ANSWER_SYSTEM_PROMPT, user=user_prompt, cache_key=cache_key)
+        parsed = self._validate(AnswerAssessmentResponseSchema, payload, context="оценка ответа")
+        return AnswerAssessment(
+            score=float(parsed.score),
+            evidence=parsed.evidence,
+            is_unclear=bool(parsed.is_unclear),
+            contradicts_resume=bool(parsed.contradicts_resume),
+        )
 
     async def compose_message(self, request: MessageRequest) -> MessageDraft:
         """Сгенерировать сообщение кандидату."""

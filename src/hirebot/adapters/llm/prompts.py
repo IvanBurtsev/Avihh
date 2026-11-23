@@ -216,3 +216,27 @@ def reply_user_prompt(request: ReplyAnalysisRequest) -> str:
         '  "confidence": <0..1>\n'
         "}"
     )
+
+
+ANSWER_SYSTEM_PROMPT = (
+    "Ты оцениваешь ответ кандидата по одному критерию вакансии. "
+    'Верни строго JSON: {"score": 0..100, "evidence": "цитата из ответа", '
+    '"is_unclear": true|false, "contradicts_resume": true|false}. '
+    "Правила: score — насколько ответ закрывает требование, а не общее впечатление. "
+    "is_unclear — если ответ не содержит информации по существу. "
+    "contradicts_resume — если ответ прямо противоречит резюме. "
+    "Не додумывай: evidence — только слова кандидата."
+)
+
+
+def answer_user_prompt(request: Any) -> str:
+    """Собрать запрос на оценку ответа: критерий, ожидание, вопрос, ответ."""
+    return (
+        f"КРИТЕРИЙ: {request.criterion_title}\n"
+        f"ТРЕБОВАНИЕ: {request.expectation}\n"
+        f"ЧТО СЧИТАТЬ ДОКАЗАТЕЛЬСТВОМ: {request.evidence_hint or 'не задано'}\n"
+        f"ВОПРОС: {request.question}\n"
+        f"ОТВЕТ КАНДИДАТА: {request.answer}\n"
+        f"РЕЗЮМЕ (для проверки противоречий): {request.resume_text[:2000] or 'нет'}\n"
+        "Оцени ответ и верни JSON."
+    )

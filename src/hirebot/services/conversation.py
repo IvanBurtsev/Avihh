@@ -66,6 +66,7 @@ from hirebot.ports.dto import (
 )
 from hirebot.ports.llm import MessageDraft, MessageRequest, ReplyAnalysisRequest
 from hirebot.ports.repositories import UnitOfWork
+from hirebot.services.answers import AnswerService
 from hirebot.services.base import DEFAULT_TIMEZONE, ServiceBase
 from hirebot.services.messaging import (
     build_idempotency_key,
@@ -311,6 +312,9 @@ class ConversationService(ServiceBase):
                     action="human_review_llm",
                 )
             used_llm = True
+            # Контекст должен видеть свежий результат: дальше от него зависят
+            # и вопросы, и запись ответа, и решение.
+            context.screening = screening
             if screening.resume_id != NO_RESUME_ID and current_state in FIRST_CONTACT_STATES:
                 await self._mark_screened(conversation_id)
                 current_state = ConversationState.SCREENED
@@ -341,6 +345,9 @@ class ConversationService(ServiceBase):
         if current_state in DIALOGUE_STATES:
             new_inbound = await self._fetch_new_inbound(context)
         if new_inbound:
+            # Ответ на уточняющий вопрос — новые данные: оцениваем и пересчитываем
+            # соответствие до того, как решать, что делать дальше.
+            await self._record_answer_if_question(context, new_inbound[-1].text)
             proposals: list[InterviewSlot] = []
             if current_state in SLOT_CHOICE_STATES:
                 proposals = await self._scheduling.propose_slots(
@@ -1094,6 +1101,59 @@ class ConversationService(ServiceBase):
                 continue
             fresh.append(message)
         return fresh
+
+    async def _record_answer_if_question(self, context: _Context, text: str) -> None:
+        """Оценить ответ, если предыдущее сообщение бота было вопросом.
+
+        Связь «ответ → критерий» берётся из профиля: вопрос задаётся по
+        конкретному критерию, и без этой связи ответ не может влиять на скоринг.
+        Если связи нет (вопрос из скрининга, не из профиля), просто не трогаем:
+        переписка важнее, чем формальная привязка.
+        """
+        if context.profile is None or context.screening is None:
+            return
+        question_text = last_clarifying_question(context.messages)
+        if not question_text:
+            return
+        question = next(
+            (
+                item
+                for item in context.profile.questions
+                if item.text.strip().casefold() == question_text.strip().casefold()
+            ),
+            None,
+        )
+        if question is None:
+            return
+
+        service = AnswerService(self._container)
+        try:
+            saved = await service.record_answer(
+                conversation_id=context.conversation_id,
+                question=question.text,
+                criterion_key=question.criterion_key,
+                answer=text,
+            )
+        except (NotFound, LlmError) as exc:
+            logger.warning(
+                "answer_recording_failed",
+                conversation_id=str(context.conversation_id),
+                error=str(exc),
+            )
+            return
+        if saved is None:
+            return
+
+        async with self.uow() as uow:
+            answers = list(await uow.answers.list_for_conversation(context.conversation_id))
+        rescored = await service.rescore(
+            conversation_id=context.conversation_id,
+            screening=context.screening,
+            profile=context.profile,
+            answers=answers,
+        )
+        # Обновляем контекст: дальше решение принимается по новому проценту.
+        context.screening = rescored
 
     async def _analyze_reply(
         self,

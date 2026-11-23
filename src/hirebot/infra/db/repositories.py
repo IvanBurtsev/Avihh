@@ -44,6 +44,7 @@ from hirebot.domain.entities import (
     DraftMessage,
     Message,
     OutboxEntry,
+    QuestionAnswer,
     Resume,
     ScreeningResult,
     Vacancy,
@@ -72,6 +73,7 @@ from hirebot.infra.db.models import (
     PaidActionRow,
     ProfileCriterionRow,
     ProfileQuestionRow,
+    QuestionAnswerRow,
     ResumeRow,
     ScoringProfileRow,
     ScreeningRow,
@@ -483,6 +485,49 @@ class SqlMessageRepository(_BaseRepository):
             )
         )
         return bool(await self._session.scalar(stmt))
+
+
+# --- Question answers --------------------------------------------------------
+
+
+class SqlQuestionAnswerRepository(_BaseRepository):
+    """Ответы кандидатов: запись и чтение по диалогу."""
+
+    async def add(self, answer: QuestionAnswer) -> QuestionAnswer:
+        row = QuestionAnswerRow(
+            id=answer.id,
+            conversation_id=answer.conversation_id,
+            criterion_key=answer.criterion_key,
+            question=answer.question,
+            answer=answer.answer,
+            score=answer.score,
+            is_unclear=answer.is_unclear,
+            contradicts_resume=answer.contradicts_resume,
+            created_at=answer.created_at,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        return answer
+
+    async def list_for_conversation(self, conversation_id: UUID) -> Sequence[QuestionAnswer]:
+        rows = await self._all(
+            select(QuestionAnswerRow)
+            .where(QuestionAnswerRow.conversation_id == conversation_id)
+            .order_by(QuestionAnswerRow.created_at)
+        )
+        return [mappers.question_answer_from_row(row) for row in rows]
+
+    async def latest_for_criterion(self, conversation_id: UUID, criterion_key: str) -> QuestionAnswer | None:
+        row = await self._first(
+            select(QuestionAnswerRow)
+            .where(
+                QuestionAnswerRow.conversation_id == conversation_id,
+                QuestionAnswerRow.criterion_key == criterion_key,
+            )
+            .order_by(QuestionAnswerRow.created_at.desc())
+            .limit(1)
+        )
+        return mappers.question_answer_from_row(row) if row is not None else None
 
 
 # --- Paid actions (бюджет) ---------------------------------------------------

@@ -24,6 +24,7 @@ from hirebot.domain.entities import (
     DraftMessage,
     Message,
     OutboxEntry,
+    QuestionAnswer,
     Resume,
     ScreeningResult,
     Vacancy,
@@ -177,6 +178,17 @@ class ScoringProfileRepository(Protocol):
 
 
 @runtime_checkable
+class QuestionAnswerRepository(Protocol):
+    """Ответы кандидатов на уточняющие вопросы."""
+
+    async def add(self, answer: QuestionAnswer) -> QuestionAnswer: ...
+    async def list_for_conversation(self, conversation_id: UUID) -> Sequence[QuestionAnswer]: ...
+    async def latest_for_criterion(
+        self, conversation_id: UUID, criterion_key: str
+    ) -> QuestionAnswer | None: ...
+
+
+@runtime_checkable
 class PaidActionRepository(Protocol):
     """Журнал платных действий и сумма расходов за период."""
 
@@ -279,6 +291,7 @@ class UnitOfWork(Protocol):
     companies: CompanyRepository
     profiles: ScoringProfileRepository
     paid_actions: PaidActionRepository
+    answers: QuestionAnswerRepository
     candidates: CandidateRepository
     resumes: ResumeRepository
     conversations: ConversationRepository
