@@ -211,6 +211,7 @@ async def _client() -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         client._vacancy_id = vacancy.id  # type: ignore[attr-defined]
+        client._container = container  # type: ignore[attr-defined]
         yield client
 
 
@@ -363,3 +364,70 @@ async def test_create_vacancy_with_duplicate_platform_id(ui_client: httpx.AsyncC
     assert first.status_code == 303
     assert second.status_code == 303
     assert "уже есть" in unquote_plus(second.headers["location"])
+
+
+async def test_delete_vacancy_without_conversations(ui_client: httpx.AsyncClient) -> None:
+    """Без диалогов вакансия удаляется полностью."""
+    await ui_client.get("/ui/vacancies/new")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+    created = await ui_client.post(
+        "/ui/vacancies",
+        data={"csrf_token": token, "title": "На удаление", "channel": "hh", "external_id": "del-1"},
+        follow_redirects=False,
+    )
+    vacancy_id = created.headers["location"].split("/ui/vacancies/")[1].split("/")[0]
+
+    response = await ui_client.post(
+        f"/ui/vacancies/{vacancy_id}/delete",
+        data={"csrf_token": token},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "удалена" in unquote_plus(response.headers["location"])
+    page = await ui_client.get("/ui/vacancies")
+    assert "На удаление" not in page.text
+
+
+async def test_delete_vacancy_with_conversations_hides_it(ui_client: httpx.AsyncClient) -> None:
+    """С диалогами вакансия скрывается: историю кандидатов удалять нельзя."""
+    from hirebot.domain.entities import Candidate, Conversation, new_id
+    from hirebot.domain.enums import Channel, ConversationState
+
+    vacancy_id: UUID = ui_client._vacancy_id  # type: ignore[attr-defined]
+    container = ui_client._container  # type: ignore[attr-defined]
+    async with container.uow_factory() as uow:
+        from hirebot.services.base import DEFAULT_COMPANY_ID
+
+        candidate = await uow.candidates.upsert(
+            Candidate(
+                id=new_id(),
+                channel=Channel.HH,
+                external_id="del-cand-1",
+                full_name="Кандидат на удаление",
+                company_id=DEFAULT_COMPANY_ID,
+            )
+        )
+        await uow.conversations.upsert(
+            Conversation(
+                id=new_id(),
+                channel=Channel.HH,
+                external_id="del-conv-1",
+                candidate_id=candidate.id,
+                vacancy_id=vacancy_id,
+                company_id=candidate.company_id,
+                state=ConversationState.NEW,
+            )
+        )
+        await uow.commit()
+
+    await ui_client.get("/ui/vacancies")
+    token = ui_client.cookies.get("hirebot_ui_csrf")
+    response = await ui_client.post(
+        f"/ui/vacancies/{vacancy_id}/delete",
+        data={"csrf_token": token},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "скрыта" in unquote_plus(response.headers["location"])

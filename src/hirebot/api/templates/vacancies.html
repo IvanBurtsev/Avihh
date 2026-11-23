@@ -6,7 +6,7 @@
 <div class="page-head">
   <div>
     <h1>Вакансии</h1>
-    <p class="muted">Критерии скоринга настраиваются под каждую вакансию и версионируются.</p>
+    <p class="muted">Критерии скоринга настраиваются под каждую вакансию и версионируются. Удаление скрывает вакансию, если с ней есть диалоги: история кандидатов сохраняется.</p>
   </div>
   <div class="page-actions">
     <a class="button primary" href="/ui/vacancies/new">Создать вакансию</a>
@@ -49,6 +49,12 @@
           <td class="muted small">{{ item.updated_at }}</td>
           <td class="numeric">
             <a href="/ui/vacancies/{{ item.id }}/scoring">Настроить критерии</a>
+            <form method="post" action="/ui/vacancies/{{ item.id }}/delete"
+                  class="inline-form"
+                  onsubmit="return confirm('Удалить вакансию «{{ item.title }}»? Если с ней есть диалоги, она будет скрыта, а история сохранена.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <button type="submit" class="link-danger">Удалить</button>
+            </form>
           </td>
         </tr>
       {% endfor %}

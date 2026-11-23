@@ -291,6 +291,13 @@ class InMemoryVacancyRepository:
         vacancy_id = self._store.vacancy_ids.get((channel, external_id))
         return self._store.vacancies.get(vacancy_id) if vacancy_id is not None else None
 
+    async def delete(self, vacancy_id: UUID) -> bool:
+        vacancy = self._store.vacancies.pop(vacancy_id, None)
+        if vacancy is None:
+            return False
+        self._store.vacancy_ids.pop((vacancy.channel, vacancy.external_id), None)
+        return True
+
     async def list_active(self, company_id: UUID) -> Sequence[Vacancy]:
         return [
             vacancy
@@ -380,6 +387,11 @@ class InMemoryConversationRepository:
         if conversation is not None:
             self.locked_ids.add(conversation_id)
         return conversation
+
+    async def count_for_vacancy(self, vacancy_id: UUID) -> int:
+        return sum(
+            1 for conversation in self._store.conversations.values() if conversation.vacancy_id == vacancy_id
+        )
 
     async def list_by_state(
         self, states: Sequence[ConversationState], *, limit: int = 100

@@ -383,6 +383,60 @@ def _scoring_service(container: Container) -> Any:
     return ScoringProfileService(container)
 
 
+@router.post("/vacancies/{vacancy_id}/delete")
+async def vacancy_delete(
+    request: Request,
+    vacancy_id: UUID,
+    settings: SettingsDep,
+    container: ContainerDep,
+    csrf: Annotated[str | None, Form(alias="csrf_token")] = None,
+) -> Response:
+    """Удалить вакансию.
+
+    Если у вакансии есть диалоги, она **скрывается**, а не стирается: удалять
+    переписку с кандидатами и историю решений нельзя — это потеря данных и
+    нарушение сроков хранения. Если диалогов нет, вакансия удаляется полностью.
+    """
+    redirect = _guard(request, settings)
+    if redirect is not None:
+        return redirect
+    verify_csrf(request, csrf)
+
+    async with container.uow_factory() as uow:
+        vacancy = await uow.vacancies.get(vacancy_id)
+        if vacancy is None:
+            return RedirectResponse(
+                url=_flash_url("/ui/vacancies", "Вакансия не найдена", kind="warn"),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        conversations = await uow.conversations.count_for_vacancy(vacancy_id)
+        if conversations > 0:
+            vacancy.is_active = False
+            await uow.vacancies.upsert(vacancy)
+            await uow.commit()
+            logger.info(
+                "ui_vacancy_archived",
+                vacancy_id=str(vacancy_id),
+                conversations=conversations,
+            )
+            return RedirectResponse(
+                url=_flash_url(
+                    "/ui/vacancies",
+                    f"Вакансия скрыта: с ней связано диалогов — {conversations}. История сохранена.",
+                    kind="info",
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        await uow.vacancies.delete(vacancy_id)
+        await uow.commit()
+
+    logger.info("ui_vacancy_deleted", vacancy_id=str(vacancy_id))
+    return RedirectResponse(
+        url=_flash_url("/ui/vacancies", "Вакансия удалена", kind="ok"),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/vacancies/new", response_class=HTMLResponse)
 async def vacancy_new_page(
     request: Request,

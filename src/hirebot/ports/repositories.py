@@ -52,6 +52,9 @@ class VacancyRepository(Protocol):
     async def get(self, vacancy_id: UUID) -> Vacancy | None: ...
     async def get_by_external(self, channel: Channel, external_id: str) -> Vacancy | None: ...
     async def list_active(self, company_id: UUID) -> Sequence[Vacancy]: ...
+    async def delete(self, vacancy_id: UUID) -> bool:
+        """Удалить вакансию физически. Возвращает False, если её нет."""
+        ...
 
 
 @runtime_checkable
@@ -78,6 +81,10 @@ class ConversationRepository(Protocol):
 
         Нужна, чтобы два параллельных воркера не написали кандидату дважды.
         """
+        ...
+
+    async def count_for_vacancy(self, vacancy_id: UUID) -> int:
+        """Сколько диалогов связано с вакансией (для безопасного удаления)."""
         ...
 
     async def list_by_state(

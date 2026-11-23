@@ -192,6 +192,15 @@ class SqlVacancyRepository(_BaseRepository):
         )
         return mappers.vacancy_from_row(row) if row is not None else None
 
+    async def delete(self, vacancy_id: UUID) -> bool:
+        """Удалить вакансию. Связанные записи уходят каскадом на уровне БД."""
+        row = await self._session.get(VacancyRow, vacancy_id)
+        if row is None:
+            return False
+        await self._session.delete(row)
+        await self._session.flush()
+        return True
+
     async def list_active(self, company_id: UUID, *, limit: int = 100, offset: int = 0) -> Sequence[Vacancy]:
         limit, offset = _clamp_pagination(limit, offset)
         rows = await self._all(
@@ -309,6 +318,8 @@ class ConversationDetails:
 
 
 class SqlConversationRepository(_BaseRepository):
+    """Диалоги. Помимо выборок — подсчёт по вакансии для безопасного удаления."""
+
     """Диалоги. ``get_with_lock`` защищает от двойного сообщения кандидату."""
 
     async def upsert(self, conversation: Conversation) -> Conversation:
@@ -356,6 +367,13 @@ class SqlConversationRepository(_BaseRepository):
             stmt = stmt.with_for_update()
         row = await self._first(stmt)
         return mappers.conversation_from_row(row) if row is not None else None
+
+    async def count_for_vacancy(self, vacancy_id: UUID) -> int:
+        """Сколько диалогов связано с вакансией."""
+        total = await self._session.scalar(
+            select(func.count()).select_from(ConversationRow).where(ConversationRow.vacancy_id == vacancy_id)
+        )
+        return int(total or 0)
 
     async def list_by_state(
         self,
